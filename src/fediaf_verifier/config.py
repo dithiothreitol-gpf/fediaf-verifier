@@ -27,7 +27,7 @@ class AppSettings(BaseSettings):
     fediaf_pdf_path: Path = Path("data/fediaf_guidelines_2021.pdf")
 
     # Token limits
-    max_tokens_main: int = 8192
+    max_tokens_main: int = 16384
     max_tokens_cross_check: int = 1024
 
     # Cross-check tolerance (percentage points)

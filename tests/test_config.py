@@ -23,7 +23,7 @@ class TestAppSettings:
 
     def test_defaults(self):
         settings = AppSettings(anthropic_api_key="sk-ant-test")
-        assert settings.max_tokens_main == 8192
+        assert settings.max_tokens_main == 16384
         assert settings.max_tokens_cross_check == 1024
         assert settings.cross_check_tolerance == 0.5
         assert settings.auto_approve_threshold == 85

@@ -8,22 +8,49 @@ Posiadasz wiedze z zakresu:
 - Rozporzadzenie (WE) nr 767/2009 o wprowadzaniu na rynek pasz
 - Wymagania etykietowania UE dla pet food
 
-=== FEDIAF MINIMALNE POZIOMY SKLADNIKOW (% suchej masy) ===
-PSY szczenieta/all_stages: bialko 22.5, tluszcz 8.0, Ca 1.0, P 0.8
-PSY dorosle/senior: bialko 18.0, tluszcz 5.0, Ca 0.5, P 0.4
-KOTY kociety/all_stages: bialko 28.0, tluszcz 9.0, Ca 0.8, P 0.6
-KOTY dorosle/senior: bialko 25.0, tluszcz 9.0, Ca 0.6, P 0.5
-(Zrodlo: FEDIAF 2021, Table 9-12)
+=== FEDIAF 2021: MINIMALNE POZIOMY SKLADNIKOW (% suchej masy) ===
 
-=== FEDIAF MAKSYMALNE POZIOMY (% suchej masy) ===
-PSY szczenieta: Ca max 3.3, P max 2.5
-PSY dorosle/senior: Ca max 4.5, P max 4.0
-KOTY kociety: Ca max 3.0, P max 2.5
-KOTY dorosle/senior: Ca max 4.0, P max 3.5
-(Zrodlo: FEDIAF 2021, Table 13)
+PSY szczenieta/all_stages (Table 11-12):
+  Bialko 22.5, Tluszcz 8.0, Wlokno max 5.0
+  Ca 1.0, P 0.8, stosunek Ca:P 1:1 do 1.6:1
+  Na 0.22, K 0.44, Mg 0.04, Fe 40mg/kg, Cu 7.2mg/kg, Zn 62mg/kg
+  Wit.A 5000IU/kg, Wit.D 500IU/kg, Wit.E 30IU/kg
+
+PSY dorosle/senior (Table 11-12):
+  Bialko 18.0, Tluszcz 5.0, Wlokno: brak max
+  Ca 0.5, P 0.4, stosunek Ca:P 1:1 do 2:1
+  Na 0.08, K 0.44, Mg 0.04, Fe 40mg/kg, Cu 7.2mg/kg, Zn 62mg/kg
+  Wit.A 5000IU/kg, Wit.D 500IU/kg, Wit.E 30IU/kg
+
+KOTY kociety/all_stages (Table 9-10):
+  Bialko 28.0, Tluszcz 9.0
+  Ca 0.8, P 0.6, stosunek Ca:P 1:1 do 1.5:1
+  Na 0.16, K 0.24, Mg 0.04, Fe 80mg/kg, Cu 8.8mg/kg, Zn 60mg/kg
+  Tauryna 0.10 (sucha) / 0.20 (mokra)
+  Wit.A 3333IU/kg, Wit.D 250IU/kg, Wit.E 38IU/kg, Arach.acid 0.02
+
+KOTY dorosle/senior (Table 9-10):
+  Bialko 25.0, Tluszcz 9.0
+  Ca 0.6, P 0.5, stosunek Ca:P 1:1 do 2:1
+  Na 0.08, K 0.24, Mg 0.04, Fe 80mg/kg, Cu 5mg/kg, Zn 60mg/kg
+  Tauryna 0.10 (sucha) / 0.20 (mokra)
+  Wit.A 3333IU/kg, Wit.D 250IU/kg, Wit.E 38IU/kg
+
+=== FEDIAF 2021: MAKSYMALNE POZIOMY (% suchej masy, Table 13) ===
+PSY szczenieta: Ca 3.3, P 2.5, Wit.A 50000IU/kg, Wit.D 3200IU/kg
+PSY dorosle: Ca 4.5, P 4.0, Wit.A 100000IU/kg, Wit.D 5000IU/kg
+KOTY kociety: Ca 3.0, P 2.5, Wit.A 33333IU/kg, Wit.D 10000IU/kg
+KOTY dorosle: Ca 4.0, P 3.5, Wit.A 33333IU/kg, Wit.D 10000IU/kg
+
+=== WYMAGANIA ETYKIETOWANIA EU (Rozp. 767/2009) ===
+Obowiazkowe: lista skladnikow (malejaco), skladniki analityczne,
+dane producenta/importera, masa netto, gatunek docelowy,
+instrukcja stosowania, numer partii lub data min. trwalosci.
+Zakaz: terapeutyczne claims bez rejestracji leczniczej.
 
 === PRZELICZENIE NA SUCHA MASE ===
 wartosc_DM = wartosc_as_fed / (1 - wilgotnosc/100)
+Typowa wilgotnosc: sucha 8-10%, mokra 75-82%, polmokra 25-35%.
 
 Twoje zadanie:
 1. Wyekstrahuj dane z etykiety: skladniki, wartosci odzywcze, info o produkcie
@@ -44,6 +71,8 @@ extraction_confidence:
 Jesli wartosc niewidoczna — wpisz null, nie zakladaj domyslnych.
 
 Odpowiedz WYLACZNIE poprawnym JSON (bez markdown, bez tekstu przed/po).
+WAZNE: badz zwiezly. Skladniki podaj w max 1 linia kazdy. \
+Opisy issues i rekomendacje — krotkie (1-2 zdania). Nie powtarzaj tresci etykiety.
 
 Pola JSON:
 product (name, brand, species, lifestage, food_type, net_weight),
