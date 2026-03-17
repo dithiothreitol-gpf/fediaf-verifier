@@ -8,7 +8,7 @@ import streamlit as st
 from loguru import logger
 
 from fediaf_verifier.config import AppSettings, get_settings
-from fediaf_verifier.converter import file_to_base64, load_pdf_base64
+from fediaf_verifier.converter import file_to_base64
 from fediaf_verifier.exceptions import (
     ConfigurationError,
     ConversionError,
@@ -295,13 +295,11 @@ def _run_verification(uploaded_file, market: str | None) -> None:
             label_b64, media_type = file_to_base64(
                 uploaded_file.read(), uploaded_file.name
             )
-            fediaf_b64 = load_pdf_base64(settings.fediaf_pdf_path)
             result = verify_label(
                 label_b64=label_b64,
                 media_type=media_type,
                 settings=settings,
                 client=client,
-                fediaf_b64=fediaf_b64,
                 market=market,
             )
         except ConfigurationError as e:

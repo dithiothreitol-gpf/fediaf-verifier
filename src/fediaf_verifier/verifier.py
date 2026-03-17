@@ -40,7 +40,7 @@ def verify_label(
     media_type: str,
     settings: AppSettings,
     client: anthropic.Anthropic,
-    fediaf_b64: str,
+    fediaf_b64: str = "",
     market: str | None = None,
 ) -> EnrichedReport:
     """Full verification pipeline with all 5 reliability layers.
@@ -60,7 +60,7 @@ def verify_label(
         APIError: If the main verification API call fails.
     """
     # -- Layer 1: AI verification with structured output + confidence scoring ----------
-    ai_report = _ai_verify(label_b64, media_type, fediaf_b64, market, client, settings)
+    ai_report = _ai_verify(label_b64, media_type, market, client, settings)
 
     # Mark all AI issues with source
     for issue in ai_report.issues:
@@ -124,12 +124,11 @@ def verify_label(
 def _ai_verify(
     label_b64: str,
     media_type: str,
-    fediaf_b64: str,
     market: str | None,
     client: anthropic.Anthropic,
     settings: AppSettings,
 ) -> VerificationReport:
-    """Layer 1: Main AI verification with structured output."""
+    """Layer 1: Main AI verification. FEDIAF tables embedded in system prompt."""
     system_prompt = SYSTEM_PROMPT_BASE
     if market:
         system_prompt += "\n\n" + build_trend_instruction(market)
@@ -169,15 +168,6 @@ def _ai_verify(
                 {
                     "role": "user",
                     "content": [
-                        {
-                            "type": "document",
-                            "source": {
-                                "type": "base64",
-                                "media_type": "application/pdf",
-                                "data": fediaf_b64,
-                            },
-                            "cache_control": {"type": "ephemeral"},
-                        },
                         label_block,
                         {
                             "type": "text",
