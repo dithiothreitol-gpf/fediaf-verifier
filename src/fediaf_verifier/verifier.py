@@ -8,6 +8,8 @@ Layers:
   5. Reference test suite                         -> tests/test_accuracy.py
 """
 
+import json
+
 import anthropic
 from loguru import logger
 
@@ -27,7 +29,7 @@ from fediaf_verifier.models import (
 )
 from fediaf_verifier.prompts import SYSTEM_PROMPT_BASE, build_trend_instruction
 from fediaf_verifier.rules import hard_check, merge_with_ai_issues
-from fediaf_verifier.utils import extract_json
+from fediaf_verifier.utils import extract_json, normalize_ai_response
 
 
 def create_client(settings: AppSettings) -> anthropic.Anthropic:
@@ -158,48 +160,91 @@ def _ai_verify(
     if market:
         tools = [{"type": "web_search_20250305", "name": "web_search"}]
 
-    try:
-        response = client.messages.create(
-            model=settings.anthropic_model,
-            max_tokens=settings.max_tokens_main,
-            system=system_prompt,
-            tools=tools if tools else anthropic.NOT_GIVEN,
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        label_block,
-                        {
-                            "type": "text",
-                            "text": (
-                                f"Zweryfikuj te etykiete produktu pet food.\n"
-                                f"Rynek: {market if market else 'nie okreslono'}.\n"
-                                f"Zwroc kompletny raport JSON z ocena confidence."
-                            ),
-                        },
-                    ],
-                }
+    user_msg = (
+        f"Zweryfikuj te etykiete produktu pet food.\n"
+        f"Rynek: {market if market else 'nie okreslono'}.\n"
+        f"Zwroc kompletny raport JSON z ocena confidence."
+    )
+
+    messages: list[dict] = [
+        {
+            "role": "user",
+            "content": [
+                label_block,
+                {"type": "text", "text": user_msg},
             ],
-        )
+        }
+    ]
 
-        # Extract last text block (skip tool_use / thinking blocks)
-        text_blocks = [
-            b.text for b in response.content if hasattr(b, "text")
-        ]
-        if not text_blocks:
-            raise APIError("API nie zwrocilo tekstu w odpowiedzi.")
+    for attempt in range(2):
+        try:
+            response = client.messages.create(
+                model=settings.anthropic_model,
+                max_tokens=settings.max_tokens_main,
+                system=system_prompt,
+                tools=tools if tools else anthropic.NOT_GIVEN,
+                messages=messages,
+            )
 
-        # Use the last text block — earlier blocks may be preamble/thinking
-        raw_text = text_blocks[-1]
-        json_text = extract_json(raw_text)
-        return VerificationReport.model_validate_json(json_text)
+            text_blocks = [
+                b.text for b in response.content if hasattr(b, "text")
+            ]
+            if not text_blocks:
+                raise APIError("API nie zwrocilo tekstu w odpowiedzi.")
 
-    except anthropic.APIError as e:
-        logger.error("Main verification API call failed: {}", e)
-        raise APIError(f"Blad API podczas weryfikacji: {e}") from e
-    except Exception as e:
-        logger.error("Failed to parse AI response: {}", e)
-        raise APIError(f"Blad parsowania odpowiedzi AI: {e}") from e
+            raw_text = text_blocks[-1]
+            json_text = extract_json(raw_text)
+            parsed = json.loads(json_text)
+            normalized = normalize_ai_response(parsed)
+            return VerificationReport.model_validate(normalized)
+
+        except anthropic.APIError as e:
+            logger.error("Main verification API call failed: {}", e)
+            raise APIError(f"Blad API podczas weryfikacji: {e}") from e
+        except Exception as e:
+            if attempt == 0:
+                logger.warning(
+                    "First parse attempt failed ({}), retrying with schema hint",
+                    e,
+                )
+                # Retry: feed back the error and demand correct schema
+                messages = [
+                    {
+                        "role": "user",
+                        "content": [
+                            label_block,
+                            {"type": "text", "text": user_msg},
+                        ],
+                    },
+                    {"role": "assistant", "content": raw_text},
+                    {
+                        "role": "user",
+                        "content": (
+                            "Twoja odpowiedz nie pasuje do wymaganego schematu. "
+                            "Blad: " + str(e)[:300] + "\n\n"
+                            "Zwroc DOKLADNIE ten schemat JSON (sam JSON, "
+                            "bez markdown):\n"
+                            '{"product": {"species": "...", "lifestage": "...", '
+                            '"food_type": "...", ...}, '
+                            '"extracted_nutrients": {"crude_protein": ..., ...}, '
+                            '"extraction_confidence": "HIGH/MEDIUM/LOW", '
+                            '"compliance_score": 0-100, '
+                            '"status": "COMPLIANT/NON_COMPLIANT/REQUIRES_REVIEW",'
+                            ' "issues": [...], '
+                            '"eu_labelling_check": {...}, '
+                            '"recommendations": [...], '
+                            '"market_trends": null}'
+                        ),
+                    },
+                ]
+                continue
+            logger.error("Failed to parse AI response after retry: {}", e)
+            raise APIError(
+                "Nie udalo sie przetworzyc odpowiedzi AI. "
+                "Sprobuj ponownie lub uzyj innego zdjecia etykiety."
+            ) from e
+
+    raise APIError("Nieoczekiwany blad w petli retry.")
 
 
 def _assess_reliability(

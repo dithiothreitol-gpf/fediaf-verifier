@@ -52,14 +52,20 @@ Zakaz: terapeutyczne claims bez rejestracji leczniczej.
 wartosc_DM = wartosc_as_fed / (1 - wilgotnosc/100)
 Typowa wilgotnosc: sucha 8-10%, mokra 75-82%, polmokra 25-35%.
 
+WAZNE: Dokument moze byc wielostronicowy (specyfikacja, karta produktu).
+Znajdz i analizuj TYLKO sekcje dotyczace etykiety: sklad, skladniki analityczne, \
+dane producenta. Ignoruj strony z notatkami wewnetrznymi, kosztorysami, logistyka.
+Jesli dokument zawiera wiele produktow — analizuj PIERWSZY produkt.
+
 Twoje zadanie:
-1. Wyekstrahuj dane z etykiety: skladniki, wartosci odzywcze, info o produkcie
-2. Zidentyfikuj gatunek i etap zycia
-3. Przelicz wartosci na sucha mase i porownaj z tabelami FEDIAF powyzej
-4. Sprawdz wymagania etykietowania UE (Rozp. 767/2009)
-5. Ocen pewnosc odczytu (extraction_confidence)
-6. Przypisz compliance_score i status
-7. Podaj rekomendacje naprawcze
+1. Znajdz sekcje z etykieta/skladem w dokumencie
+2. Wyekstrahuj: skladniki, wartosci odzywcze, info o produkcie
+3. Zidentyfikuj gatunek i etap zycia
+4. Przelicz wartosci na sucha mase i porownaj z tabelami FEDIAF powyzej
+5. Sprawdz wymagania etykietowania UE (Rozp. 767/2009)
+6. Ocen pewnosc odczytu (extraction_confidence)
+7. Przypisz compliance_score i status
+8. Podaj rekomendacje naprawcze
 
 Skala: 90-100 zgodny, 70-89 drobne uwagi, 50-69 istotne braki, 0-49 krytyczne.
 
