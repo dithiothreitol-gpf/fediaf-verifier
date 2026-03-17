@@ -24,6 +24,29 @@ logger.add(sys.stderr, level="INFO")
 Path("logs").mkdir(exist_ok=True)
 logger.add("logs/bult_{time}.log", rotation="10 MB", retention="30 days", level="DEBUG")
 
+_FEDIAF_PDF_URL = (
+    "https://europeanpetfood.org/wp-content/uploads/2025/09/"
+    "FEDIAF-Nutritional-Guidelines_2025-ONLINE.pdf"
+)
+
+
+def _download_fediaf_pdf(pdf_path: Path) -> None:
+    """Auto-download FEDIAF Guidelines PDF if missing."""
+    import urllib.request
+
+    pdf_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with st.spinner("Pobieram FEDIAF Nutritional Guidelines..."):
+            urllib.request.urlretrieve(_FEDIAF_PDF_URL, pdf_path)
+            logger.info("FEDIAF PDF downloaded to {}", pdf_path)
+    except Exception as e:
+        logger.error("Failed to download FEDIAF PDF: {}", e)
+        st.warning(
+            f"Nie uda\u0142o si\u0119 pobra\u0107 automatycznie: {e}\n\n"
+            "Pobierz r\u0119cznie z europeanpetfood.org i umie\u015b\u0107 w data/."
+        )
+
+
 # -- Custom CSS for professional look --------------------------------------------------
 _CUSTOM_CSS = """
 <style>
@@ -196,15 +219,14 @@ with st.sidebar:
     st.divider()
 
     pdf_path = settings.fediaf_pdf_path
+    if not pdf_path.is_file():
+        _download_fediaf_pdf(pdf_path)
+
     if pdf_path.is_file():
         size_mb = pdf_path.stat().st_size / 1_048_576
         st.success(f"FEDIAF Guidelines ({size_mb:.1f} MB) \u2713")
     else:
-        st.error(
-            f"Brak pliku `{pdf_path}`\n\n"
-            "Pobierz FEDIAF Nutritional Guidelines ze strony fediaf.org "
-            "i zapisz w folderze data/."
-        )
+        st.error("Nie uda\u0142o si\u0119 pobra\u0107 FEDIAF Guidelines.")
         st.stop()
 
     with st.expander("O warstwach weryfikacji"):
