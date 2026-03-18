@@ -137,6 +137,60 @@ def to_text(report: EnrichedReport, filename: str, market: str | None) -> str:
         lines.append(f"  [{icon}] {label}")
     lines.append("")
 
+    # Packaging check
+    pkg = report.packaging_check
+    CLASSIFICATION_LABELS = {
+        "complete": "Karma pelnoporcjowa",
+        "complementary": "Karma uzupelniajaca",
+        "treat": "Przysmak",
+        "not_stated": "Nie okreslono",
+    }
+    lines.append("KONTROLA OPAKOWANIA:")
+    lines.append(
+        f"  Klasyfikacja: "
+        f"{CLASSIFICATION_LABELS.get(pkg.product_classification, pkg.product_classification)}"
+    )
+    pkg_items = {
+        "Instrukcja dawkowania": pkg.feeding_guidelines_present,
+        "Przechowywanie": pkg.storage_instructions_present,
+        "Symbol e przy masie": pkg.net_weight_e_symbol,
+        "Kraj pochodzenia": pkg.country_of_origin_stated,
+        "Brak claimow leczniczych": pkg.no_therapeutic_claims,
+        "Regula % w nazwie OK": pkg.naming_percentage_rule_ok,
+        "Oznaczenia recyklingu": pkg.recycling_symbols_present,
+        "Kod EAN widoczny": pkg.barcode_visible,
+        "Kod QR widoczny": pkg.qr_code_visible,
+        "Emblemat gatunku": pkg.species_emblem_present,
+        "Miejsce na date/partie": pkg.date_marking_area_present,
+        "Tlumaczenia kompletne": pkg.translations_complete,
+        "Kody krajow": pkg.country_codes_for_languages,
+        "Oswiadczenie FEDIAF": pkg.compliance_statement_present,
+        "Kontakt do info (Art.19)": pkg.free_contact_for_info,
+        "Nr zatwierdzenia zakladu": pkg.establishment_approval_number,
+        "Deklaracja GMO": pkg.gmo_declaration_present,
+        "Czytelnosc fontu": pkg.font_legibility_ok,
+        "Polski kompletny": pkg.polish_language_complete,
+    }
+    if pkg.is_raw_product:
+        pkg_items["Ostrzezenia raw/BARF"] = pkg.raw_warning_present
+    if pkg.contains_insect_protein:
+        pkg_items["Alergia krzyzowa (owady)"] = pkg.insect_allergen_warning
+    if pkg.moisture_declaration_required:
+        pkg_items["Wilgotnosc >14% zadeklarowana"] = pkg.moisture_declaration_present
+    for label, val in pkg_items.items():
+        icon = "OK" if val else "BRAK"
+        lines.append(f"  [{icon}] {label}")
+    if not pkg.claims_consistent_with_composition or pkg.claims_inconsistencies:
+        lines.append("  SPOJNOSC CLAIMOW:")
+        for inc in pkg.claims_inconsistencies:
+            lines.append(f"    ! {inc}")
+    if pkg.naming_percentage_notes:
+        lines.append(f"  Regula % uwagi: {pkg.naming_percentage_notes}")
+    if pkg.packaging_notes:
+        for note in pkg.packaging_notes:
+            lines.append(f"  Uwaga: {note}")
+    lines.append("")
+
     # Recommendations
     if report.recommendations:
         lines.append("REKOMENDACJE:")

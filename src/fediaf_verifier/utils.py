@@ -3,7 +3,12 @@
 from __future__ import annotations
 
 import re
+import time
+from collections.abc import Callable
 from typing import Any
+
+import anthropic
+from loguru import logger
 
 _JSON_FENCE_RE = re.compile(r"```(?:json)?\s*\n(.*?)\n\s*```", re.DOTALL)
 
@@ -78,7 +83,7 @@ _STATUS_MAP: dict[str, str] = {
 }
 
 
-def _fuzzy_lookup(value: str, mapping: dict[str, str]) -> str:
+def fuzzy_lookup(value: str, mapping: dict[str, str]) -> str:
     """Look up a value in a mapping, trying lowercase prefix match."""
     if not isinstance(value, str):
         return value
@@ -113,34 +118,34 @@ def normalize_ai_response(data: dict) -> dict:
     product = data.get("product", {})
     if isinstance(product, dict):
         if "species" in product:
-            product["species"] = _fuzzy_lookup(
+            product["species"] = fuzzy_lookup(
                 product["species"], _SPECIES_MAP
             )
         if "lifestage" in product:
-            product["lifestage"] = _fuzzy_lookup(
+            product["lifestage"] = fuzzy_lookup(
                 product["lifestage"], _LIFESTAGE_MAP
             )
         if "food_type" in product:
-            product["food_type"] = _fuzzy_lookup(
+            product["food_type"] = fuzzy_lookup(
                 product["food_type"], _FOOD_TYPE_MAP
             )
 
     # -- Extraction confidence --
     if "extraction_confidence" in data:
-        data["extraction_confidence"] = _fuzzy_lookup(
+        data["extraction_confidence"] = fuzzy_lookup(
             data["extraction_confidence"], _CONFIDENCE_MAP
         )
 
     # -- Status --
     if "status" in data:
-        data["status"] = _fuzzy_lookup(data["status"], _STATUS_MAP)
+        data["status"] = fuzzy_lookup(data["status"], _STATUS_MAP)
 
     # -- Issues: normalize severity --
     issues = data.get("issues", [])
     if isinstance(issues, list):
         for issue in issues:
             if isinstance(issue, dict) and "severity" in issue:
-                issue["severity"] = _fuzzy_lookup(
+                issue["severity"] = fuzzy_lookup(
                     issue["severity"], _SEVERITY_MAP
                 )
 
@@ -161,4 +166,91 @@ def normalize_ai_response(data: dict) -> dict:
         for key in list(eu.keys()):
             eu[key] = _to_bool(eu[key])
 
+    # -- Packaging check normalization --
+    pkg = data.get("packaging_check", {})
+    if isinstance(pkg, dict):
+        _CLASSIFICATION_MAP = {
+            "complete": "complete",
+            "pełnoporcjowa": "complete",
+            "pelnoporcjowa": "complete",
+            "complementary": "complementary",
+            "uzupełniająca": "complementary",
+            "uzupelniajaca": "complementary",
+            "treat": "treat",
+            "przysmak": "treat",
+            "not_stated": "not_stated",
+        }
+        if "product_classification" in pkg:
+            pkg["product_classification"] = fuzzy_lookup(
+                pkg["product_classification"], _CLASSIFICATION_MAP
+            )
+        # Normalize boolean fields
+        bool_fields = [
+            "feeding_guidelines_present", "storage_instructions_present",
+            "claims_consistent_with_composition", "meat_percentage_claim_consistent",
+            "net_weight_e_symbol", "country_of_origin_stated", "no_therapeutic_claims",
+            "naming_percentage_rule_ok", "recycling_symbols_present", "barcode_visible",
+            "qr_code_visible", "species_emblem_present", "date_marking_area_present",
+            "translations_complete", "country_codes_for_languages",
+            "compliance_statement_present",
+            "gmo_declaration_required",
+            "gmo_declaration_present",
+            "free_contact_for_info",
+            "is_raw_product",
+            "raw_warning_present",
+            "contains_insect_protein",
+            "insect_allergen_warning",
+            "irradiation_declared_if_applicable",
+            "establishment_approval_number",
+            "moisture_declaration_required",
+            "moisture_declaration_present",
+            "font_legibility_ok",
+            "polish_language_complete",
+        ]
+        for field in bool_fields:
+            if field in pkg:
+                pkg[field] = _to_bool(pkg[field])
+
     return data
+
+
+def api_call_with_retry[T](
+    fn: Callable[[], T],
+    max_retries: int = 3,
+    base_delay: float = 15.0,
+    spinner_callback: Callable[[str], None] | None = None,
+) -> T:
+    """Call fn() with exponential backoff on rate limit (429) errors.
+
+    Args:
+        fn: Zero-arg callable that makes the API call.
+        max_retries: Maximum number of attempts.
+        base_delay: Base delay in seconds (doubles each retry).
+        spinner_callback: Optional function to update UI with wait message.
+
+    Returns:
+        Result of fn().
+
+    Raises:
+        anthropic.RateLimitError: If all retries exhausted.
+        anthropic.APIError: For non-rate-limit API errors (no retry).
+    """
+    for attempt in range(max_retries):
+        try:
+            return fn()
+        except anthropic.RateLimitError:
+            if attempt == max_retries - 1:
+                raise
+            delay = base_delay * (2**attempt)  # 15s, 30s, 60s
+            logger.warning(
+                "Rate limit hit, retrying in {}s (attempt {}/{})",
+                delay,
+                attempt + 1,
+                max_retries,
+            )
+            if spinner_callback:
+                spinner_callback(
+                    f"Rate limit — czekam {int(delay)}s przed ponowna proba..."
+                )
+            time.sleep(delay)
+    raise RuntimeError("Unexpected: retry loop completed without return or raise")

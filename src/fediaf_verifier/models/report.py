@@ -10,6 +10,7 @@ from .issues import Issue
 from .linguistic import LinguisticCheckResult
 from .market_trends import MarketTrends
 from .nutrients import NutrientValues
+from .packaging import PackagingCheck
 from .product import Product
 
 
@@ -40,6 +41,7 @@ class VerificationReport(BaseModel):
     status: ComplianceStatus
     issues: list[Issue] = []
     eu_labelling_check: EULabellingCheck
+    packaging_check: PackagingCheck = PackagingCheck()
     recommendations: list[str] = []
     market_trends: MarketTrends | None = None
 
@@ -61,6 +63,7 @@ class EnrichedReport(BaseModel):
     status: ComplianceStatus
     issues: list[Issue] = []
     eu_labelling_check: EULabellingCheck
+    packaging_check: PackagingCheck = PackagingCheck()
     recommendations: list[str] = []
     market_trends: MarketTrends | None = None
 

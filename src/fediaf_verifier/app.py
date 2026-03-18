@@ -229,17 +229,149 @@ with st.sidebar:
         st.error("Nie uda\u0142o si\u0119 pobra\u0107 FEDIAF Guidelines.")
         st.stop()
 
-    with st.expander("O warstwach weryfikacji"):
-        st.markdown("""
-**Jak sprawdzamy rzetelno\u015b\u0107:**
+    st.divider()
+    st.subheader("\U0001f4d6 Podr\u0119cznik u\u017cytkownika")
 
-1. Model ocenia pewno\u015b\u0107 odczytu ka\u017cdej warto\u015bci
-2. Niezale\u017cny drugi odczyt warto\u015bci liczbowych
-3. Progi FEDIAF zakodowane bezpo\u015brednio w Pythonie
-4. Automatyczna eskalacja do eksperta przy w\u0105tpliwo\u015bciach
-5. Zestaw testowy z r\u0119cznie potwierdzonymi wynikami
+    with st.expander("Jak zacz\u0105\u0107?"):
+        st.markdown("""\
+1. **Wgraj etykiet\u0119** \u2014 przeci\u0105gnij plik lub kliknij przycisk uploadu
+2. **Wybierz rynek** \u2014 opcjonalnie, je\u015bli chcesz analiz\u0119 trend\u00f3w
+3. **Kliknij "Sprawd\u017a etykiet\u0119"** \u2014 analiza trwa 30\u201390 sekund
+4. **Przejrzyj raport** \u2014 przewi\u0144 w d\u00f3\u0142 po zako\u0144czeniu
+5. **Pobierz raport** \u2014 JSON (do systemu) lub TXT (do wydruku)
+""")
+
+    with st.expander("Obs\u0142ugiwane formaty plik\u00f3w"):
+        st.markdown("""\
+| Format | Opis |
+|--------|------|
+| **JPG / PNG** | Zdj\u0119cie etykiety (najlepiej ca\u0142a etykieta, dobra ostro\u015b\u0107) |
+| **PDF** | Wielostronicowa specyfikacja \u2014 system znajdzie sekcj\u0119 z etykiet\u0105 |
+| **DOCX** | Dokument Word (wymaga LibreOffice do konwersji) |
+
+**Wskaz\u00f3wki:**
+- Im lepsza jako\u015b\u0107 zdj\u0119cia, tym wy\u017csza pewno\u015b\u0107 odczytu
+- Upewnij si\u0119, \u017ce tabela analityczna jest czytelna
+- Wielostronicowe PDF \u2014 system analizuje pierwszy produkt
+""")
+
+    with st.expander("Co oznaczaj\u0105 sekcje raportu?"):
+        st.markdown("""\
+**\u2705 Status i wynik zgodno\u015bci**
+- **90\u2013100 pkt** \u2014 pe\u0142na zgodno\u015b\u0107, produkt gotowy
+- **70\u201389 pkt** \u2014 drobne uwagi, dopuszczalny z zaleceniami
+- **50\u201369 pkt** \u2014 istotne braki, wymaga korekty
+- **0\u201349 pkt** \u2014 krytyczne niezgodno\u015bci
+
+**\U0001f7e2\U0001f7e1\U0001f534 Pewno\u015b\u0107 odczytu**
+- **Wysoka** \u2014 wszystkie warto\u015bci wyra\u017anie czytelne
+- **\u015arednia** \u2014 1\u20132 pozycje budz\u0105 w\u0105tpliwo\u015bci
+- **Niska** \u2014 znaczna cz\u0119\u015b\u0107 nieczytelna \u2014 wymagana weryfikacja
+
+**Weryfikacja krzy\u017cowa**
+Niezale\u017cny, drugi odczyt warto\u015bci liczbowych. \
+Je\u015bli r\u00f3\u017cnica > 0.5%, system flaguje rozbie\u017cno\u015b\u0107.
+
+**Weryfikacja j\u0119zykowa**
+Sprawdzenie ortografii, gramatyki, znak\u00f3w diakrytycznych \
+i sp\u00f3jno\u015bci terminologii na etykiecie.
+
+**Regu\u0142y deterministyczne FEDIAF**
+Progi zakodowane w Pythonie \u2014 dzia\u0142aj\u0105 niezale\u017cnie od AI. \
+Nawet je\u015bli model si\u0119 pomyli, ta warstwa wy\u0142apie naruszenia.
+
+**Wymagania EU (Rozp. 767/2009)**
+6 obowi\u0105zkowych element\u00f3w etykiety: lista sk\u0142adnik\u00f3w, \
+sk\u0142adniki analityczne, producent, masa netto, gatunek, partia/data.
+
+**Kontrola opakowania**
+Rozszerzona checklista: dawkowanie, przechowywanie, claimy vs sk\u0142ad, \
+oznaczenia recyklingu, kody kreskowe, nr zak\u0142adu, GMO i wi\u0119cej.
+""")
+
+    with st.expander("Kiedy konsultowa\u0107 z ekspertem?"):
+        st.markdown("""\
+System automatycznie oznacza raport jako **wymagaj\u0105cy przegl\u0105du** gdy:
+
+- \u26d4 Wynik < 60 punkt\u00f3w
+- \U0001f534 Pewno\u015b\u0107 odczytu = Niska
+- \u26a0\ufe0f Status = "Do sprawdzenia"
+- \u274c Rozbie\u017cno\u015b\u0107 mi\u0119dzy odczytami > 0.5%
+- \u26a0\ufe0f 2+ ostrze\u017cenia o rzetelno\u015bci
+
+**Zawsze konsultuj z ekspertem je\u015bli:**
+- Produkt przeznaczony na nowy rynek eksportowy
+- Etykieta zawiera claimy funkcjonalne (np. "skin & coat")
+- Produkt dietetyczny (PARNUT) \u2014 dodatkowe wymagania
+- Masz w\u0105tpliwo\u015bci co do jako\u015bci zdj\u0119cia/dokumentu
+""")
+
+    with st.expander("S\u0142ownik poj\u0119\u0107"):
+        st.markdown("""\
+| Poj\u0119cie | Znaczenie |
+|---------|-----------|
+| **FEDIAF** | Europejska Federacja Przemys\u0142u Karm \u2014 wytyczne \u017cywieniowe |
+| **Rozp. 767/2009** | G\u0142\u00f3wna regulacja UE dot. etykietowania karm |
+| **DM (sucha masa)** | Warto\u015b\u0107 bez wilgotno\u015bci \u2014 do por\u00f3wna\u0144 |
+| **As-fed** | Warto\u015b\u0107 "tak jak podano" \u2014 z uwzgl\u0119dnieniem wilgotno\u015bci |
+| **Ca:P** | Stosunek wapnia do fosforu \u2014 krytyczny dla zdrowia ko\u015bci |
+| **PARNUT** | Karma dietetyczna o szczeg\u00f3lnym przeznaczeniu \u017cywieniowym |
+| **Tauryna** | Aminokwas niezb\u0119dny dla kot\u00f3w \u2014 minimum 0.1% DM |
+| **Compliance score** | Wynik zgodno\u015bci 0\u2013100 obliczany automatycznie |
+| **Cross-check** | Niezale\u017cny drugi odczyt warto\u015bci z etykiety |
+| **Symbol \u2117** | Znak metrologiczny przy masie netto (wymag. prawne) |
+| **Art.19** | Obowi\u0105zek podania kontaktu do info o dodatkach |
+""")
+
+    with st.expander("Jak dzia\u0142a system?"):
+        st.markdown("""\
+**3 warstwy weryfikacji:**
+
+**1. Ekstrakcja danych**
+System odczytuje z etykiety: sk\u0142ad, warto\u015bci od\u017cywcze, \
+claimy, elementy widoczne na opakowaniu.
+
+**2. Analiza zgodno\u015bci**
+Wyekstrahowane dane s\u0105 weryfikowane wzgl\u0119dem:
+- Prog\u00f3w FEDIAF 2021 (min/max sk\u0142adnik\u00f3w od\u017cywczych)
+- Wymaga\u0144 EU 767/2009 (obowi\u0105zkowe elementy etykiety)
+- Checklisty opakowania (30 punkt\u00f3w kontrolnych)
+- Sp\u00f3jno\u015bci claim\u00f3w ze sk\u0142adem
+
+**3. Niezale\u017cna weryfikacja**
+Drugi, niezale\u017cny odczyt warto\u015bci liczbowych \
++ sprawdzenie j\u0119zykowe etykiety.
+
+**Wynik:** powtarzalny compliance score obliczany \
+na podstawie twardych regu\u0142, nie interpretacji.
 
 *Narz\u0119dzie wspomagaj\u0105ce prac\u0119 dzia\u0142u jako\u015bci.*
+""")
+
+    with st.expander("FAQ"):
+        st.markdown("""\
+**Ile trwa analiza?**
+30\u201360 sekund bez trend\u00f3w, 60\u201390 z trendami rynkowymi.
+
+**Czy system zast\u0119puje eksperta?**
+Nie. Eliminuje 80\u201390% rutynowej pracy. Przypadki graniczne \
+zawsze eskaluje do cz\u0142owieka.
+
+**Co je\u015bli zdj\u0119cie jest z\u0142ej jako\u015bci?**
+System oznaczy pewno\u015b\u0107 jako "Niska" i zaleci weryfikacj\u0119 \
+z orygina\u0142em. Spr\u00f3buj lepszego zdj\u0119cia.
+
+**Jak dzia\u0142a cross-check?**
+Niezale\u017cny, drugi odczyt pobiera TYLKO liczby z tabeli analitycznej. \
+Je\u015bli r\u00f3\u017cni\u0105 si\u0119 od g\u0142\u00f3wnego odczytu > 0.5%, system flaguje.
+
+**Czy dane s\u0105 przechowywane?**
+Nie. Analiza odbywa si\u0119 w pami\u0119ci. Po zamkni\u0119ciu przegl\u0105darki \
+dane znikaj\u0105. Raporty s\u0105 zapisywane tylko je\u015bli je pobierzesz.
+
+**Co je\u015bli wyst\u0105pi b\u0142\u0105d "Rate limit"?**
+System automatycznie ponawia pr\u00f3b\u0119 po 15\u201360 sekundach. \
+Przy cz\u0119stych b\u0142\u0119dach \u2014 odczekaj minut\u0119 mi\u0119dzy analizami.
 """)
 
     st.divider()
@@ -609,6 +741,112 @@ def _render_report(
         eu_html += f'<div class="eu-item">{icon} {label}</div>'
     eu_html += "</div>"
     st.markdown(eu_html, unsafe_allow_html=True)
+
+    # -- Packaging check --------------------------------------------------------------
+    pkg = report.packaging_check
+    st.subheader("Kontrola opakowania")
+
+    CLASSIFICATION_LABELS = {
+        "complete": "Karma pe\u0142noporcjowa",
+        "complementary": "Karma uzupe\u0142niaj\u0105ca",
+        "treat": "Przysmak",
+        "not_stated": "Nie okre\u015blono",
+    }
+
+    pkg_items_1 = {
+        "Instrukcja dawkowania": pkg.feeding_guidelines_present,
+        "Przechowywanie": pkg.storage_instructions_present,
+        "Symbol \u2117 przy masie": pkg.net_weight_e_symbol,
+        "Kraj pochodzenia": pkg.country_of_origin_stated,
+        "Oznaczenia recyklingu": pkg.recycling_symbols_present,
+        "Kod EAN widoczny": pkg.barcode_visible,
+    }
+    pkg_items_2 = {
+        "Kod QR widoczny": pkg.qr_code_visible,
+        "Emblemat gatunku": pkg.species_emblem_present,
+        "Miejsce na dat\u0119/parti\u0119": pkg.date_marking_area_present,
+        "T\u0142umaczenia kompletne": pkg.translations_complete,
+        "Kody kraj\u00f3w": pkg.country_codes_for_languages,
+        "O\u015bwiadczenie FEDIAF": pkg.compliance_statement_present,
+        "Kontakt do info (Art.19)": pkg.free_contact_for_info,
+        "Nr zatwierdzenia zak\u0142adu": pkg.establishment_approval_number,
+        "Czytelno\u015b\u0107 fontu": pkg.font_legibility_ok,
+        "Polski kompletny": pkg.polish_language_complete,
+    }
+
+    pkg_html = '<div class="eu-grid">'
+    for label, val in {**pkg_items_1, **pkg_items_2}.items():
+        icon = "\u2705" if val else "\u274c"
+        pkg_html += f'<div class="eu-item">{icon} {label}</div>'
+    pkg_html += "</div>"
+    st.markdown(pkg_html, unsafe_allow_html=True)
+
+    # Classification
+    cls_label = CLASSIFICATION_LABELS.get(
+        pkg.product_classification.value,
+        pkg.product_classification.value,
+    )
+    st.markdown(
+        f"**Klasyfikacja produktu:** {cls_label}"
+    )
+
+    # Claims consistency — the most important part
+    if not pkg.claims_consistent_with_composition or pkg.claims_inconsistencies:
+        st.markdown("**Sp\u00f3jno\u015b\u0107 claim\u00f3w ze sk\u0142adem:**")
+        if pkg.claims_inconsistencies:
+            for inc in pkg.claims_inconsistencies:
+                st.error(f"\u274c {inc}")
+        if not pkg.no_therapeutic_claims:
+            st.error(
+                "\u274c Wykryto claimy o charakterze leczniczym "
+                "(naruszenie EU 767/2009 Art.13)"
+            )
+    if not pkg.naming_percentage_rule_ok and pkg.naming_percentage_notes:
+        st.warning(
+            f"\u26a0\ufe0f Regu\u0142a % w nazwie: {pkg.naming_percentage_notes}"
+        )
+    # Regulatory alerts
+    if not pkg.free_contact_for_info:
+        st.warning(
+            "\u26a0\ufe0f Brak bezp\u0142atnego kontaktu do info o dodatkach "
+            "i sk\u0142adnikach (wymaganie Art.19 Reg 767/2009)"
+        )
+    if not pkg.establishment_approval_number:
+        st.warning(
+            "\u26a0\ufe0f Brak numeru zatwierdzenia/rejestracji zak\u0142adu "
+            "(wymaganie Reg 767/2009 + Reg 183/2005)"
+        )
+    if pkg.is_raw_product and not pkg.raw_warning_present:
+        st.error(
+            "\u274c Surowa karma wymaga ostrze\u017ce\u0144: "
+            '"PET FOOD ONLY" + "NOT FOR HUMAN CONSUMPTION" '
+            "(Reg 142/2011)"
+        )
+    if pkg.gmo_declaration_required and not pkg.gmo_declaration_present:
+        st.error(
+            "\u274c Sk\u0142adnik GMO >0.9% — brak obowi\u0105zkowej deklaracji "
+            "(Reg 1829/2003)"
+        )
+    if pkg.gmo_notes:
+        st.info(f"GMO: {pkg.gmo_notes}")
+    if pkg.contains_insect_protein and not pkg.insect_allergen_warning:
+        st.warning(
+            "\u26a0\ufe0f Bia\u0142ko owad\u00f3w — brak ostrze\u017cenia "
+            "o alergii krzy\u017cowej (EFSA guidance)"
+        )
+    if pkg.moisture_declaration_required and not pkg.moisture_declaration_present:
+        st.warning(
+            "\u26a0\ufe0f Wilgotno\u015b\u0107 >14% — deklaracja obowi\u0105zkowa "
+            "(767/2009 Annex V)"
+        )
+    if not pkg.font_legibility_ok and pkg.font_legibility_notes:
+        st.warning(
+            f"\u26a0\ufe0f Czytelno\u015b\u0107: {pkg.font_legibility_notes}"
+        )
+    if pkg.packaging_notes:
+        with st.expander("Dodatkowe uwagi"):
+            for note in pkg.packaging_notes:
+                st.write(f"\u2022 {note}")
 
     # -- Recommendations ---------------------------------------------------------------
     recs = report.recommendations

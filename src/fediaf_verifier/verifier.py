@@ -1,11 +1,9 @@
-"""FEDIAF label verification pipeline — orchestrates all 5 reliability layers.
+"""FEDIAF label verification pipeline — 2-call architecture.
 
-Layers:
-  1. Structured outputs + confidence scoring  -> messages.parse(output_format=...)
-  2. Cross-validation of numeric values       -> cross_check_nutrients()
-  3. Deterministic FEDIAF rules                   -> hard_check()
-  4. Human-in-the-loop (logic in app.py)          -> requires_human_review flag
-  5. Reference test suite                         -> tests/test_accuracy.py
+Call 1: AI extracts raw data from label (what it sees)
+Python: Deterministic compliance analysis (FEDIAF, EU, packaging rules)
+Call 2: AI cross-checks nutrients + linguistic verification
+Python: Merge into final EnrichedReport
 """
 
 import json
@@ -13,23 +11,24 @@ import json
 import anthropic
 from loguru import logger
 
+from fediaf_verifier.compliance import (
+    ComplianceResult,
+    analyze_compliance,
+    build_cross_check_result,
+)
 from fediaf_verifier.config import AppSettings
-from fediaf_verifier.cross_check import cross_check_nutrients
 from fediaf_verifier.exceptions import APIError
-from fediaf_verifier.linguistic_check import perform_linguistic_check
 from fediaf_verifier.models import (
     ComplianceStatus,
     CrossCheckResult,
     EnrichedReport,
     ExtractionConfidence,
-    Issue,
+    LabelExtraction,
     LinguisticCheckResult,
-    Severity,
-    VerificationReport,
+    SecondaryCheck,
 )
-from fediaf_verifier.prompts import SYSTEM_PROMPT_BASE, build_trend_instruction
-from fediaf_verifier.rules import hard_check, merge_with_ai_issues
-from fediaf_verifier.utils import extract_json, normalize_ai_response
+from fediaf_verifier.prompts import EXTRACTION_PROMPT, SECONDARY_CHECK_PROMPT
+from fediaf_verifier.utils import api_call_with_retry, extract_json
 
 
 def create_client(settings: AppSettings) -> anthropic.Anthropic:
@@ -45,99 +44,42 @@ def verify_label(
     fediaf_b64: str = "",
     market: str | None = None,
 ) -> EnrichedReport:
-    """Full verification pipeline with all 5 reliability layers.
+    """Full verification pipeline: 2 AI calls + deterministic analysis.
 
     Args:
         label_b64: Label image/document encoded as base64.
         media_type: MIME type of the label.
         settings: Application settings.
         client: Anthropic client instance.
-        fediaf_b64: FEDIAF guidelines PDF encoded as base64.
+        fediaf_b64: Unused (kept for API compat). FEDIAF tables in prompt.
         market: Target market country or None.
 
     Returns:
-        EnrichedReport with all pipeline additions.
-
-    Raises:
-        APIError: If the main verification API call fails.
+        EnrichedReport with all analysis results.
     """
-    # -- Layer 1: AI verification with structured output + confidence scoring ----------
-    ai_report = _ai_verify(label_b64, media_type, market, client, settings)
+    # -- CALL 1: Extract raw data from label -------------------------------------------
+    logger.info("Call 1: Extracting label data...")
+    extraction = _extract_label_data(label_b64, media_type, client, settings)
 
-    # Mark all AI issues with source
-    for issue in ai_report.issues:
-        if issue.source is None:
-            issue.source = "AI"
+    # -- PYTHON: Deterministic compliance analysis -------------------------------------
+    logger.info("Running deterministic compliance analysis...")
+    compliance = analyze_compliance(extraction)
 
-    # -- Layer 2: Cross-validation of numeric values -----------------------------------
-    logger.info("Running cross-check (Layer 2)...")
-    cross_result = cross_check_nutrients(
-        label_b64, media_type, ai_report.extracted_nutrients, client, settings
-    )
+    # -- CALL 2: Cross-check + linguistic (with rate limit retry) ----------------------
+    logger.info("Call 2: Cross-check + linguistic verification...")
+    secondary = _secondary_check(label_b64, media_type, client, settings)
 
-    # -- Linguistic check ----------------------------------------------------------------
-    logger.info("Running linguistic check...")
-    linguistic_result = perform_linguistic_check(
-        label_b64, media_type, client, settings
-    )
-
-    # -- Layer 3: Deterministic FEDIAF rules -------------------------------------------
-    logger.info("Running deterministic rules (Layer 3)...")
-    hard_flags = hard_check(ai_report.product, ai_report.extracted_nutrients)
-    merged_issues = merge_with_ai_issues(list(ai_report.issues), hard_flags)
-
-    # Adjust status if hard rules found critical issues that AI missed
-    updated_status = ai_report.status
-    updated_score = ai_report.compliance_score
-    if (
-        any(f.severity == Severity.CRITICAL for f in hard_flags)
-        and ai_report.status == ComplianceStatus.COMPLIANT
-    ):
-        updated_status = ComplianceStatus.NON_COMPLIANT
-        updated_score = min(ai_report.compliance_score, 49)
-
-    # -- Layer 4: Determine human review requirement -----------------------------------
-    reliability_flags = _assess_reliability(
-        ai_report, cross_result, hard_flags, linguistic_result
-    )
-    requires_human = _requires_human_review(
-        updated_score,
-        ai_report.extraction_confidence,
-        updated_status,
-        cross_result,
-        reliability_flags,
-        settings,
-    )
-
-    # -- Construct enriched report -----------------------------------------------------
-    return EnrichedReport(
-        **ai_report.model_dump(exclude={"issues", "status", "compliance_score"}),
-        issues=merged_issues,
-        status=updated_status,
-        compliance_score=updated_score,
-        hard_rule_flags=hard_flags,
-        cross_check_result=cross_result,
-        linguistic_check_result=linguistic_result,
-        reliability_flags=reliability_flags,
-        requires_human_review=requires_human,
-    )
+    # -- PYTHON: Build final report ----------------------------------------------------
+    return _build_enriched_report(extraction, compliance, secondary, settings)
 
 
-def _ai_verify(
-    label_b64: str,
-    media_type: str,
-    market: str | None,
-    client: anthropic.Anthropic,
-    settings: AppSettings,
-) -> VerificationReport:
-    """Layer 1: Main AI verification. FEDIAF tables embedded in system prompt."""
-    system_prompt = SYSTEM_PROMPT_BASE
-    if market:
-        system_prompt += "\n\n" + build_trend_instruction(market)
+# -- Call 1: Extraction ----------------------------------------------------------------
 
-    # Build label content block based on media type
+
+def _build_label_block(label_b64: str, media_type: str) -> dict:
+    """Build content block for label (image or document)."""
     if media_type == "application/pdf":
-        label_block: dict = {
+        return {
             "type": "document",
             "source": {
                 "type": "base64",
@@ -145,168 +87,233 @@ def _ai_verify(
                 "data": label_b64,
             },
         }
-    else:
-        label_block = {
-            "type": "image",
-            "source": {
-                "type": "base64",
-                "media_type": media_type,
-                "data": label_b64,
-            },
-        }
+    return {
+        "type": "image",
+        "source": {
+            "type": "base64",
+            "media_type": media_type,
+            "data": label_b64,
+        },
+    }
 
-    # Tools for market trends (web search)
-    tools: list[dict] | None = None
-    if market:
-        tools = [{"type": "web_search_20250305", "name": "web_search"}]
 
-    user_msg = (
-        f"Zweryfikuj te etykiete produktu pet food.\n"
-        f"Rynek: {market if market else 'nie okreslono'}.\n"
-        f"Zwroc kompletny raport JSON z ocena confidence."
+def _extract_label_data(
+    label_b64: str,
+    media_type: str,
+    client: anthropic.Anthropic,
+    settings: AppSettings,
+) -> LabelExtraction:
+    """Call 1: Extract all visible data from label. No compliance judgments."""
+    label_block = _build_label_block(label_b64, media_type)
+
+    def _call() -> LabelExtraction:
+        response = client.messages.create(
+            model=settings.anthropic_model,
+            max_tokens=settings.max_tokens_main,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        label_block,
+                        {"type": "text", "text": EXTRACTION_PROMPT},
+                    ],
+                }
+            ],
+        )
+
+        text_blocks = [b.text for b in response.content if hasattr(b, "text")]
+        if not text_blocks:
+            raise APIError("API nie zwrocilo tekstu w odpowiedzi.")
+
+        raw_text = text_blocks[-1]
+        json_text = extract_json(raw_text)
+        data = json.loads(json_text)
+
+        # Normalize booleans (AI might return "yes"/"tak" instead of true)
+        for key, val in list(data.items()):
+            if (
+                key.startswith("has_")
+                or key in (
+                    "is_raw_product",
+                    "contains_insect_protein",
+                    "font_legibility_ok",
+                    "translations_complete",
+                    "country_codes_present",
+                    "polish_text_complete",
+                )
+            ) and isinstance(val, str):
+                    data[key] = val.lower().strip() in (
+                        "true", "yes", "tak", "1", "present",
+                    )
+
+        return LabelExtraction.model_validate(data)
+
+    try:
+        return api_call_with_retry(_call)
+    except anthropic.APIError as e:
+        logger.error("Extraction API call failed: {}", e)
+        raise APIError(f"Blad API podczas ekstrakcji: {e}") from e
+    except Exception as e:
+        logger.error("Failed to parse extraction response: {}", e)
+        raise APIError(
+            "Nie udalo sie odczytac danych z etykiety. "
+            "Sprobuj innego zdjecia lub formatu."
+        ) from e
+
+
+# -- Call 2: Secondary check (cross-check + linguistic) --------------------------------
+
+
+def _secondary_check(
+    label_b64: str,
+    media_type: str,
+    client: anthropic.Anthropic,
+    settings: AppSettings,
+) -> SecondaryCheck | None:
+    """Call 2: Cross-check nutrients + linguistic verification. Non-blocking."""
+    label_block = _build_label_block(label_b64, media_type)
+
+    def _call() -> SecondaryCheck:
+        response = client.messages.create(
+            model=settings.anthropic_model,
+            max_tokens=settings.max_tokens_linguistic,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        label_block,
+                        {"type": "text", "text": SECONDARY_CHECK_PROMPT},
+                    ],
+                }
+            ],
+        )
+
+        text_blocks = [b.text for b in response.content if hasattr(b, "text")]
+        if not text_blocks:
+            raise APIError("API nie zwrocilo tekstu.")
+
+        raw_text = text_blocks[-1]
+        json_text = extract_json(raw_text)
+        data = json.loads(json_text)
+        return SecondaryCheck.model_validate(data)
+
+    try:
+        return api_call_with_retry(_call)
+    except Exception as e:
+        logger.warning("Secondary check failed (non-blocking): {}", e)
+        return None
+
+
+# -- Build final report ----------------------------------------------------------------
+
+
+def _build_enriched_report(
+    extraction: LabelExtraction,
+    compliance: ComplianceResult,
+    secondary: SecondaryCheck | None,
+    settings: AppSettings,
+) -> EnrichedReport:
+    """Assemble all results into the final EnrichedReport."""
+    # Cross-check comparison
+    cross_result = build_cross_check_result(
+        extraction, secondary, settings.cross_check_tolerance
     )
 
-    messages: list[dict] = [
-        {
-            "role": "user",
-            "content": [
-                label_block,
-                {"type": "text", "text": user_msg},
-            ],
-        }
-    ]
+    # Linguistic result
+    linguistic_result = LinguisticCheckResult(performed=False)
+    if secondary and secondary.linguistic_issues is not None:
+        from fediaf_verifier.models import LinguisticReport
 
-    for attempt in range(2):
-        try:
-            response = client.messages.create(
-                model=settings.anthropic_model,
-                max_tokens=settings.max_tokens_main,
-                system=system_prompt,
-                tools=tools if tools else anthropic.NOT_GIVEN,
-                messages=messages,
-            )
+        linguistic_result = LinguisticCheckResult(
+            performed=True,
+            report=LinguisticReport(
+                detected_language=secondary.detected_language,
+                detected_language_name=secondary.detected_language_name,
+                issues=secondary.linguistic_issues,
+                overall_quality=secondary.overall_language_quality,
+                summary=secondary.language_summary,
+            ),
+        )
 
-            text_blocks = [
-                b.text for b in response.content if hasattr(b, "text")
-            ]
-            if not text_blocks:
-                raise APIError("API nie zwrocilo tekstu w odpowiedzi.")
+    # Reliability flags
+    reliability_flags = _assess_reliability(
+        compliance, cross_result, linguistic_result
+    )
 
-            raw_text = text_blocks[-1]
-            json_text = extract_json(raw_text)
-            parsed = json.loads(json_text)
-            normalized = normalize_ai_response(parsed)
-            return VerificationReport.model_validate(normalized)
+    # Human review determination
+    requires_human = _requires_human_review(
+        compliance.score,
+        compliance.confidence,
+        compliance.status,
+        cross_result,
+        reliability_flags,
+        settings,
+    )
 
-        except anthropic.APIError as e:
-            logger.error("Main verification API call failed: {}", e)
-            raise APIError(f"Blad API podczas weryfikacji: {e}") from e
-        except Exception as e:
-            if attempt == 0:
-                logger.warning(
-                    "First parse attempt failed ({}), retrying with schema hint",
-                    e,
-                )
-                # Retry: feed back the error and demand correct schema
-                messages = [
-                    {
-                        "role": "user",
-                        "content": [
-                            label_block,
-                            {"type": "text", "text": user_msg},
-                        ],
-                    },
-                    {"role": "assistant", "content": raw_text},
-                    {
-                        "role": "user",
-                        "content": (
-                            "Twoja odpowiedz nie pasuje do wymaganego schematu. "
-                            "Blad: " + str(e)[:300] + "\n\n"
-                            "Zwroc DOKLADNIE ten schemat JSON (sam JSON, "
-                            "bez markdown):\n"
-                            '{"product": {"species": "...", "lifestage": "...", '
-                            '"food_type": "...", ...}, '
-                            '"extracted_nutrients": {"crude_protein": ..., ...}, '
-                            '"extraction_confidence": "HIGH/MEDIUM/LOW", '
-                            '"compliance_score": 0-100, '
-                            '"status": "COMPLIANT/NON_COMPLIANT/REQUIRES_REVIEW",'
-                            ' "issues": [...], '
-                            '"eu_labelling_check": {...}, '
-                            '"recommendations": [...], '
-                            '"market_trends": null}'
-                        ),
-                    },
-                ]
-                continue
-            logger.error("Failed to parse AI response after retry: {}", e)
-            raise APIError(
-                "Nie udalo sie przetworzyc odpowiedzi AI. "
-                "Sprobuj ponownie lub uzyj innego zdjecia etykiety."
-            ) from e
-
-    raise APIError("Nieoczekiwany blad w petli retry.")
+    return EnrichedReport(
+        product=compliance.product,
+        extracted_nutrients=compliance.nutrients,
+        ingredients_list=extraction.ingredients,
+        extraction_confidence=compliance.confidence,
+        values_requiring_manual_check=extraction.values_requiring_check,
+        compliance_score=compliance.score,
+        status=compliance.status,
+        issues=compliance.issues,
+        eu_labelling_check=compliance.eu_check,
+        packaging_check=compliance.packaging,
+        recommendations=compliance.recommendations,
+        market_trends=None,  # TODO: market trends as separate optional call
+        hard_rule_flags=[i for i in compliance.issues if i.source == "HARD_RULE"],
+        cross_check_result=cross_result,
+        linguistic_check_result=linguistic_result,
+        reliability_flags=reliability_flags,
+        requires_human_review=requires_human,
+    )
 
 
 def _assess_reliability(
-    report: VerificationReport,
+    compliance: ComplianceResult,
     cross_check: CrossCheckResult,
-    hard_flags: list[Issue],
-    linguistic_result: LinguisticCheckResult | None = None,
+    linguistic: LinguisticCheckResult,
 ) -> list[str]:
-    """Assess result reliability and return warning flags.
-
-    Does not modify the result — only informs the UI about risks.
-    """
+    """Assess result reliability and return warning flags."""
     flags: list[str] = []
 
-    if report.extraction_confidence == ExtractionConfidence.LOW:
+    if compliance.confidence == ExtractionConfidence.LOW:
         flags.append(
             "Niska pewnosc odczytu — znaczna czesc wartosci moze byc blednie "
-            "odczytana z obrazu. Zalecana weryfikacja z oryginalna etykieta."
+            "odczytana. Zalecana weryfikacja z oryginalem."
         )
-    elif report.extraction_confidence == ExtractionConfidence.MEDIUM:
+    elif compliance.confidence == ExtractionConfidence.MEDIUM:
         flags.append(
-            "Srednia pewnosc odczytu — pojedyncze wartosci odczytane z watpliwoscia."
-        )
-
-    if report.values_requiring_manual_check:
-        flags.append(
-            f"Wartosci wymagajace sprawdzenia: "
-            f"{', '.join(report.values_requiring_manual_check)}"
+            "Srednia pewnosc odczytu — pojedyncze wartosci watpliwe."
         )
 
     if cross_check.passed is False:
         for d in cross_check.discrepancies:
             flags.append(
-                f"Rozbieznosc w odczycie {d.nutrient}: "
-                f"glowny odczyt {d.main_value}%, "
-                f"weryfikacja krzyzowa {d.cross_value}% "
-                f"(roznica {d.difference}%). "
-                "Sprawdz oryginal."
+                f"Rozbieznosc: {d.nutrient} — "
+                f"odczyt {d.main_value}% vs weryfikacja {d.cross_value}% "
+                f"(roznica {d.difference}%)"
             )
 
     if cross_check.passed is None:
         flags.append(
-            "Weryfikacja krzyzowa nie zostala wykonana — "
-            "wyniki opieraja sie wylacznie na glownym odczycie."
+            "Weryfikacja krzyzowa nie zostala wykonana."
         )
 
-    if hard_flags:
+    hard_count = sum(1 for i in compliance.issues if i.source == "HARD_RULE")
+    if hard_count:
         flags.append(
-            f"Reguly deterministyczne FEDIAF wykryly {len(hard_flags)} "
-            "dodatkowych problemow niezaleznie od analizy AI."
+            f"Reguly deterministyczne wykryly {hard_count} problemow."
         )
 
     if (
-        linguistic_result
-        and linguistic_result.performed
-        and linguistic_result.report
-        and linguistic_result.report.overall_quality == "poor"
+        linguistic.performed
+        and linguistic.report
+        and linguistic.report.overall_quality == "poor"
     ):
-        flags.append(
-            "Weryfikacja jezykowa wykryla liczne bledy na etykiecie "
-            "— tekst wymaga gruntownej korekty."
-        )
+        flags.append("Tekst na etykiecie wymaga gruntownej korekty jezykowej.")
 
     return flags
 

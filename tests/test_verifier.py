@@ -1,4 +1,4 @@
-"""Verifier pipeline tests with mocked API client."""
+"""Verifier pipeline tests with mocked API calls."""
 
 from unittest.mock import MagicMock, patch
 
@@ -7,14 +7,8 @@ import pytest
 from fediaf_verifier.config import AppSettings
 from fediaf_verifier.models import (
     ComplianceStatus,
-    CrossCheckResult,
-    Discrepancy,
-    EULabellingCheck,
-    ExtractionConfidence,
-    LinguisticCheckResult,
-    NutrientValues,
-    Product,
-    VerificationReport,
+    LabelExtraction,
+    SecondaryCheck,
 )
 from fediaf_verifier.verifier import verify_label
 
@@ -30,190 +24,154 @@ def mock_client():
 
 
 @pytest.fixture
-def compliant_ai_report() -> VerificationReport:
-    return VerificationReport(
-        product=Product(species="dog", lifestage="adult", food_type="dry"),
-        extracted_nutrients=NutrientValues(
-            crude_protein=22.0,
-            crude_fat=8.0,
-            moisture=10.0,
-            calcium=1.2,
-            phosphorus=0.9,
-        ),
-        extraction_confidence=ExtractionConfidence.HIGH,
-        compliance_score=95,
-        status=ComplianceStatus.COMPLIANT,
-        issues=[],
-        eu_labelling_check=EULabellingCheck(
-            ingredients_listed=True,
-            analytical_constituents_present=True,
-            manufacturer_info=True,
-            net_weight_declared=True,
-            species_clearly_stated=True,
-            batch_or_date_present=True,
-        ),
-        recommendations=[],
+def compliant_extraction() -> LabelExtraction:
+    return LabelExtraction(
+        species="dog",
+        lifestage="adult",
+        food_type_text="dry",
+        crude_protein=22.0,
+        crude_fat=8.0,
+        moisture=10.0,
+        calcium=1.2,
+        phosphorus=0.9,
+        has_ingredients_list=True,
+        has_analytical_constituents=True,
+        has_manufacturer_info=True,
+        has_net_weight=True,
+        has_species_stated=True,
+        has_batch_number=True,
+        has_feeding_guidelines=True,
+        has_free_contact_info=True,
+        has_establishment_number=True,
+        product_classification_text="complete",
+        extraction_confidence="HIGH",
     )
 
 
-def _mock_ai_response(report: VerificationReport) -> MagicMock:
-    """Build a mock messages.create() response containing JSON text."""
+def _mock_extraction_response(extraction: LabelExtraction) -> MagicMock:
     text_block = MagicMock()
-    text_block.text = report.model_dump_json()
+    text_block.text = extraction.model_dump_json()
+    mock_response = MagicMock()
+    mock_response.content = [text_block]
+    return mock_response
+
+
+def _mock_secondary_response(secondary: SecondaryCheck) -> MagicMock:
+    text_block = MagicMock()
+    text_block.text = secondary.model_dump_json()
     mock_response = MagicMock()
     mock_response.content = [text_block]
     return mock_response
 
 
 class TestVerifyLabel:
-    @patch("fediaf_verifier.verifier.perform_linguistic_check")
-    @patch("fediaf_verifier.verifier.cross_check_nutrients")
-    def test_compliant_label_no_human_review(
-        self,
-        mock_cross_check,
-        mock_ling_check,
-        mock_client,
-        _settings,
-        compliant_ai_report,
-    ):
-        """Compliant label with high confidence should not require human review."""
-        mock_client.messages.create.return_value = _mock_ai_response(
-            compliant_ai_report
+    def test_compliant_label(self, mock_client, _settings, compliant_extraction):
+        """Compliant label with all elements should score high."""
+        secondary = SecondaryCheck(
+            cross_crude_protein=22.0,
+            cross_crude_fat=8.0,
+            detected_language="pl",
+            detected_language_name="polski",
+            overall_language_quality="excellent",
+            language_summary="OK",
         )
 
-        mock_cross_check.return_value = CrossCheckResult(passed=True)
-        mock_ling_check.return_value = LinguisticCheckResult(performed=True)
+        mock_client.messages.create.side_effect = [
+            _mock_extraction_response(compliant_extraction),
+            _mock_secondary_response(secondary),
+        ]
 
         result = verify_label(
             label_b64="b64data",
             media_type="image/jpeg",
             settings=_settings,
             client=mock_client,
-            fediaf_b64="fediaf_b64",
         )
 
         assert result.status == ComplianceStatus.COMPLIANT
+        assert result.compliance_score >= 70
         assert result.requires_human_review is False
-        assert len(result.hard_rule_flags) == 0
-        assert result.linguistic_check_result.performed is True
+        assert result.product.species.value == "dog"
 
-    @patch("fediaf_verifier.verifier.perform_linguistic_check")
-    @patch("fediaf_verifier.verifier.cross_check_nutrients")
-    def test_hard_rules_override_ai_status(
-        self, mock_cross_check, mock_ling_check, mock_client, _settings
-    ):
-        """If AI says COMPLIANT but hard rules find critical issue, override."""
-        ai_report = VerificationReport(
-            product=Product(species="dog", lifestage="adult", food_type="dry"),
-            extracted_nutrients=NutrientValues(
-                crude_protein=15.0,  # Below 18% DM minimum
-                crude_fat=8.0,
-                moisture=10.0,
-            ),
-            extraction_confidence=ExtractionConfidence.HIGH,
-            compliance_score=90,
-            status=ComplianceStatus.COMPLIANT,
-            issues=[],
-            eu_labelling_check=EULabellingCheck(
-                ingredients_listed=True,
-                analytical_constituents_present=True,
-                manufacturer_info=True,
-                net_weight_declared=True,
-                species_clearly_stated=True,
-                batch_or_date_present=True,
-            ),
+    def test_protein_below_min_detected(self, mock_client, _settings):
+        """Low protein should be caught by deterministic rules."""
+        extraction = LabelExtraction(
+            species="dog",
+            lifestage="adult",
+            food_type_text="dry",
+            crude_protein=15.0,
+            crude_fat=8.0,
+            moisture=10.0,
+            has_ingredients_list=True,
+            has_analytical_constituents=True,
+            has_manufacturer_info=True,
+            has_net_weight=True,
+            has_species_stated=True,
+            has_batch_number=True,
+            has_feeding_guidelines=True,
+            has_free_contact_info=True,
+            has_establishment_number=True,
+            product_classification_text="complete",
+        )
+        secondary = SecondaryCheck(
+            cross_crude_protein=15.0,
+            detected_language="pl",
+            detected_language_name="polski",
+            overall_language_quality="good",
+            language_summary="OK",
         )
 
-        mock_client.messages.create.return_value = _mock_ai_response(ai_report)
-        mock_cross_check.return_value = CrossCheckResult(passed=True)
-        mock_ling_check.return_value = LinguisticCheckResult(performed=True)
+        mock_client.messages.create.side_effect = [
+            _mock_extraction_response(extraction),
+            _mock_secondary_response(secondary),
+        ]
 
         result = verify_label(
             label_b64="b64data",
             media_type="image/jpeg",
             settings=_settings,
             client=mock_client,
-            fediaf_b64="fediaf_b64",
         )
 
-        assert result.status == ComplianceStatus.NON_COMPLIANT
-        assert result.compliance_score <= 49
-        assert len(result.hard_rule_flags) > 0
         assert any(
-            f.code == "CRUDE_PROTEIN_BELOW_MIN" for f in result.hard_rule_flags
+            i.code == "CRUDE_PROTEIN_BELOW_MIN" for i in result.issues
         )
+        assert result.compliance_score < 100
 
-    @patch("fediaf_verifier.verifier.perform_linguistic_check")
-    @patch("fediaf_verifier.verifier.cross_check_nutrients")
-    def test_low_confidence_requires_human_review(
-        self, mock_cross_check, mock_ling_check, mock_client, _settings
+    @patch("fediaf_verifier.utils.time.sleep")
+    def test_secondary_failure_non_blocking(
+        self, mock_sleep, mock_client, _settings, compliant_extraction
     ):
-        """Low extraction confidence should trigger human review."""
-        ai_report = VerificationReport(
-            product=Product(species="dog", lifestage="adult", food_type="dry"),
-            extracted_nutrients=NutrientValues(crude_protein=22.0, moisture=10.0),
-            extraction_confidence=ExtractionConfidence.LOW,
-            compliance_score=80,
-            status=ComplianceStatus.COMPLIANT,
-            issues=[],
-            eu_labelling_check=EULabellingCheck(
-                ingredients_listed=True,
-                analytical_constituents_present=True,
-                manufacturer_info=True,
-                net_weight_declared=True,
-                species_clearly_stated=True,
-                batch_or_date_present=True,
+        """If Call 2 fails, pipeline still completes."""
+        import anthropic as anth
+
+        mock_client.messages.create.side_effect = [
+            _mock_extraction_response(compliant_extraction),
+            anth.RateLimitError(
+                message="rate limit",
+                response=MagicMock(status_code=429, headers={}),
+                body=None,
             ),
-        )
-
-        mock_client.messages.create.return_value = _mock_ai_response(ai_report)
-        mock_cross_check.return_value = CrossCheckResult(passed=True)
-        mock_ling_check.return_value = LinguisticCheckResult(performed=True)
-
-        result = verify_label(
-            label_b64="b64data",
-            media_type="image/jpeg",
-            settings=_settings,
-            client=mock_client,
-            fediaf_b64="fediaf_b64",
-        )
-
-        assert result.requires_human_review is True
-
-    @patch("fediaf_verifier.verifier.perform_linguistic_check")
-    @patch("fediaf_verifier.verifier.cross_check_nutrients")
-    def test_cross_check_failure_triggers_review(
-        self,
-        mock_cross_check,
-        mock_ling_check,
-        mock_client,
-        _settings,
-        compliant_ai_report,
-    ):
-        """Cross-check discrepancies should trigger human review."""
-        mock_client.messages.create.return_value = _mock_ai_response(
-            compliant_ai_report
-        )
-
-        mock_cross_check.return_value = CrossCheckResult(
-            passed=False,
-            discrepancies=[
-                Discrepancy(
-                    nutrient="crude_protein",
-                    main_value=22.0,
-                    cross_value=18.0,
-                    difference=4.0,
-                )
-            ],
-        )
-        mock_ling_check.return_value = LinguisticCheckResult(performed=True)
+            anth.RateLimitError(
+                message="rate limit",
+                response=MagicMock(status_code=429, headers={}),
+                body=None,
+            ),
+            anth.RateLimitError(
+                message="rate limit",
+                response=MagicMock(status_code=429, headers={}),
+                body=None,
+            ),
+        ]
 
         result = verify_label(
             label_b64="b64data",
             media_type="image/jpeg",
             settings=_settings,
             client=mock_client,
-            fediaf_b64="fediaf_b64",
         )
 
-        assert result.requires_human_review is True
+        # Pipeline should still return a valid report
+        assert result.product.species.value == "dog"
+        assert result.cross_check_result.passed is None
+        assert result.linguistic_check_result.performed is False
