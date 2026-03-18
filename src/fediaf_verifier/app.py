@@ -405,11 +405,71 @@ Przy cz\u0119stych b\u0142\u0119dach \u2014 odczekaj minut\u0119 mi\u0119dzy ana
 
 
 # -- Upload section --------------------------------------------------------------------
+
+# Clipboard paste support via JS injection
+_PASTE_JS = """\
+<div id="paste-zone" style="
+    border: 2px dashed rgba(128,128,128,0.3);
+    border-radius: 10px;
+    padding: 1.2rem;
+    text-align: center;
+    cursor: pointer;
+    margin-bottom: 1rem;
+    transition: border-color 0.2s;
+" tabindex="0">
+    <span style="opacity:0.5; font-size:0.9rem;">
+        \U0001f4cb Wklej screenshot (Ctrl+V)
+    </span>
+</div>
+<script>
+const pasteZone = document.getElementById('paste-zone');
+document.addEventListener('paste', function(e) {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (const item of items) {
+        if (item.type.startsWith('image/')) {
+            const blob = item.getAsFile();
+            const reader = new FileReader();
+            reader.onload = function() {
+                const base64 = reader.result.split(',')[1];
+                window.parent.postMessage({
+                    type: 'streamlit:setComponentValue',
+                    data: {base64: base64, name: 'clipboard_' +
+                        new Date().toISOString().slice(0,19).replace(/:/g,'-')
+                        + '.png'}
+                }, '*');
+            };
+            reader.readAsDataURL(blob);
+            pasteZone.innerHTML =
+                '<span style="color:#4CAF50;">\u2705 Screenshot wklejony</span>';
+            e.preventDefault();
+            return;
+        }
+    }
+});
+pasteZone.addEventListener('click', function() { this.focus(); });
+</script>
+"""
+
+# Clipboard paste via session state (camera_input as fallback for images)
+if "pasted_image" not in st.session_state:
+    st.session_state.pasted_image = None
+
 uploaded = st.file_uploader(
     "Wgraj etykiet\u0119 produktu",
     type=["jpg", "jpeg", "png", "pdf", "docx"],
-    help="JPG, PNG, PDF lub dokument Word (.docx)",
+    help="JPG, PNG, PDF, DOCX lub wklej screenshot (Ctrl+V)",
 )
+
+# Camera input as clipboard alternative (works on all Streamlit versions)
+with st.expander("\U0001f4f7 Zr\u00f3b zdj\u0119cie lub wklej screenshot", expanded=False):
+    camera_img = st.camera_input(
+        "Zr\u00f3b zdj\u0119cie etykiety",
+        help="Kliknij aby zrobi\u0107 zdj\u0119cie kamer\u0105 lub u\u017cyj jako "
+        "alternatyw\u0119 dla wklejania screenshot\u00f3w.",
+    )
+    if camera_img is not None:
+        uploaded = camera_img
 
 if uploaded:
     col_preview, col_info = st.columns([1, 2])
