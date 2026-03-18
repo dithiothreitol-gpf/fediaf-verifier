@@ -1,0 +1,18 @@
+# Zmień na swoją domenę — Caddy automatycznie pobierze certyfikat SSL
+# Przykład: bult.twojafirma.pl
+#
+# Jeśli nie masz domeny, użyj tymczasowo:
+#   :80 {
+#       reverse_proxy app:8501
+#   }
+
+bult.example.com {
+    reverse_proxy app:8501
+
+    # WebSocket support (wymagany przez Streamlit)
+    @ws {
+        header Connection *Upgrade*
+        header Upgrade    websocket
+    }
+    reverse_proxy @ws app:8501
+}

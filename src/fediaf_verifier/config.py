@@ -51,8 +51,8 @@ class AppSettings(BaseSettings):
     auto_approve_threshold: int = 85
     manual_required_threshold: int = 60
 
-    # Linguistic check
-    max_tokens_linguistic: int = 4096
+    # Linguistic check (cross-check + linguistic combined — needs headroom)
+    max_tokens_linguistic: int = 8192
 
     # Logging
     log_level: str = "INFO"

@@ -28,6 +28,62 @@ def extract_json(text: str) -> str:
     return text
 
 
+def repair_truncated_json(text: str) -> str | None:
+    """Attempt to repair JSON truncated by max_tokens limit.
+
+    Closes unclosed strings, arrays, and objects so json.loads() can succeed.
+    Returns repaired JSON string or None if repair is not possible.
+    """
+    import json as _json
+
+    # First extract the JSON portion
+    extracted = extract_json(text)
+
+    # Try as-is first
+    try:
+        _json.loads(extracted)
+        return extracted
+    except _json.JSONDecodeError:
+        pass
+
+    # Work with the raw extracted text
+    repaired = extracted.rstrip()
+
+    # Remove trailing comma
+    repaired = re.sub(r",\s*$", "", repaired)
+
+    # Remove incomplete key-value pair at the end (e.g. `"key": "incompl`)
+    # Pattern: trailing `"key": "...` without closing quote
+    repaired = re.sub(r',?\s*"[^"]*":\s*"[^"]*$', "", repaired)
+    # Pattern: trailing `"key": ` without value
+    repaired = re.sub(r',?\s*"[^"]*":\s*$', "", repaired)
+    # Pattern: trailing incomplete array element
+    repaired = re.sub(r',?\s*"[^"]*$', "", repaired)
+
+    # Remove trailing comma again after cleanup
+    repaired = re.sub(r",\s*$", "", repaired)
+
+    # Count unclosed brackets and braces
+    open_braces = repaired.count("{") - repaired.count("}")
+    open_brackets = repaired.count("[") - repaired.count("]")
+
+    # Close them
+    repaired += "]" * max(0, open_brackets)
+    repaired += "}" * max(0, open_braces)
+
+    try:
+        _json.loads(repaired)
+        logger.warning(
+            "Repaired truncated JSON (closed {} braces, {} brackets)",
+            max(0, open_braces),
+            max(0, open_brackets),
+        )
+        return repaired
+    except _json.JSONDecodeError:
+        logger.error("Could not repair truncated JSON")
+        return None
+
+
 # -- Normalization maps for AI response cleanup ------------------------------------
 
 _SPECIES_MAP: dict[str, str] = {

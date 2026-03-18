@@ -125,7 +125,22 @@ class AnthropicProvider:
         text_blocks = [b.text for b in response.content if hasattr(b, "text")]
         if not text_blocks:
             raise ProviderAPIError("API nie zwrocilo tekstu w odpowiedzi.")
-        return text_blocks[-1]
+
+        raw = text_blocks[-1]
+
+        # Detect truncated response (hit max_tokens limit)
+        if response.stop_reason == "max_tokens":
+            from fediaf_verifier.utils import repair_truncated_json
+
+            repaired = repair_truncated_json(raw)
+            if repaired is not None:
+                return repaired
+            raise ProviderAPIError(
+                "Odpowiedz AI zostala ucieta (za dluga). "
+                "Sprobuj ponownie lub zmniejsz zlozonosc etykiety."
+            )
+
+        return raw
 
 
 # -- Gemini --------------------------------------------------------------------
@@ -182,7 +197,29 @@ class GeminiProvider:
 
         if not response.text:
             raise ProviderAPIError("Gemini nie zwrocilo tekstu w odpowiedzi.")
-        return response.text
+
+        raw = response.text
+
+        # Detect truncated response (Gemini: check finish_reason)
+        finish_reason = None
+        if response.candidates:
+            finish_reason = getattr(
+                response.candidates[0], "finish_reason", None
+            )
+        if finish_reason and str(finish_reason).upper() in (
+            "MAX_TOKENS", "LENGTH",
+        ):
+            from fediaf_verifier.utils import repair_truncated_json
+
+            repaired = repair_truncated_json(raw)
+            if repaired is not None:
+                return repaired
+            raise ProviderAPIError(
+                "Odpowiedz AI zostala ucieta (za dluga). "
+                "Sprobuj ponownie lub zmniejsz zlozonosc etykiety."
+            )
+
+        return raw
 
 
 # -- Factory -------------------------------------------------------------------

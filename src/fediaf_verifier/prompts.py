@@ -56,7 +56,7 @@ Sprawdz caly tekst na etykiecie pod katem:
 - Spojnosc terminologii (mieszanie jezykow w jednym bloku, np. "bialko" obok "protein")
 Automatycznie wykryj jezyk(i).
 
-Odpowiedz WYLACZNIE poprawnym JSON (bez markdown). Pola:
+Odpowiedz WYLACZNIE poprawnym JSON (bez markdown). Badz ZWIEZLY — krotkie opisy, max 10 najwazniejszych bledow jezykowych. Pola:
 cross_crude_protein/fat/fibre/moisture/crude_ash/calcium/phosphorus (liczby lub null),
 cross_reading_notes,
 detected_language (np. "pl"), detected_language_name (np. "polski"),
