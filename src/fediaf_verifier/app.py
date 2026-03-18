@@ -1021,9 +1021,19 @@ def _render_linguistic_report(
     getattr(st, banner_type)(banner_msg)
 
     # Metrics
-    mc1, mc2, mc3 = st.columns(3)
-    mc1.metric("J\u0119zyk", f"{lr.detected_language_name}")
-    mc2.metric("Jako\u015b\u0107", lr.overall_quality.upper())
+    _QUALITY_LABELS = {
+        "excellent": "\u2705 Doskona\u0142a",
+        "good": "\U0001f535 Dobra",
+        "needs_review": "\U0001f7e1 Do poprawy",
+        "poor": "\U0001f534 S\u0142aba",
+    }
+    quality_label = _QUALITY_LABELS.get(
+        lr.overall_quality, lr.overall_quality
+    )
+
+    mc1, mc2, mc3 = st.columns([2, 2, 1])
+    mc1.metric("J\u0119zyk", lr.detected_language_name)
+    mc2.metric("Jako\u015b\u0107", quality_label)
     mc3.metric("Problemy", str(issue_count))
 
     if lr.summary:
