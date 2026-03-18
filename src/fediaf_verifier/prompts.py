@@ -64,6 +64,29 @@ linguistic_issues (lista: [{issue_type, original, suggestion, context, explanati
 overall_language_quality ("excellent"/"good"/"needs_review"/"poor"),
 language_summary."""
 
+# -- Standalone linguistic check prompt ------------------------------------------------
+
+LINGUISTIC_ONLY_PROMPT = """\
+Sprawdz caly widoczny tekst na tej etykiecie karmy dla zwierzat pod katem:
+
+1. ORTOGRAFIA — literowki, bledne zapisy slow
+2. ZNAKI DIAKRYTYCZNE — brakujace lub bledne: \
+a→ą, e→ę, s→ś, c→ć, z→ź/ż, l→ł, n→ń, o→ó
+3. GRAMATYKA — bledna odmiana, skladnia, koncowki
+4. INTERPUNKCJA — brak/nadmiar przecinkow, kropek, dwukropkow
+5. SPOJNOSC TERMINOLOGII — mieszanie jezykow w jednym bloku \
+(np. "bialko" obok "protein"), niespojne nazewnictwo
+
+Automatycznie wykryj jezyk(i) na etykiecie.
+Badz dokladny — sprawdz KAZDY fragment tekstu.
+
+Odpowiedz WYLACZNIE poprawnym JSON (bez markdown). Pola:
+detected_language (np. "pl"), detected_language_name (np. "polski"),
+issues (lista: [{issue_type, original, suggestion, context, explanation}]),
+issue_type: "spelling"/"grammar"/"punctuation"/"diacritics"/"terminology",
+overall_quality ("excellent"/"good"/"needs_review"/"poor"),
+summary (krotkie podsumowanie jakosci tekstu)."""
+
 # -- Market trends prompt (optional, uses web_search) ---------------------------------
 
 

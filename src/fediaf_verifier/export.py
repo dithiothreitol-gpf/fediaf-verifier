@@ -1,7 +1,7 @@
 """Report export — JSON and TXT formatters."""
 
 
-from fediaf_verifier.models import EnrichedReport
+from fediaf_verifier.models import EnrichedReport, LinguisticCheckResult
 
 
 def to_json(report: EnrichedReport) -> str:
@@ -217,6 +217,59 @@ def to_text(report: EnrichedReport, filename: str, market: str | None) -> str:
         "ZASTRZEZENIE: Raport wygenerowany automatycznie przez system AI.",
         "Wyniki < 85 pkt lub REQUIRES_REVIEW wymagaja weryfikacji eksperta",
         "ds. zywienia zwierzat przed podjeciem decyzji regulacyjnej.",
+        "=" * 60,
+    ])
+
+    return "\n".join(lines)
+
+
+def linguistic_to_text(result: LinguisticCheckResult, filename: str) -> str:
+    """Format standalone linguistic check as human-readable text."""
+    lines = [
+        "=" * 60,
+        "WERYFIKACJA JEZYKOWA — BULT Quality Check",
+        "=" * 60,
+        f"Plik: {filename}",
+        "",
+    ]
+
+    if not result.performed or not result.report:
+        lines.append(
+            f"Weryfikacja nie powiodla sie: {result.error or 'nieznany blad'}"
+        )
+        return "\n".join(lines)
+
+    lr = result.report
+    ISSUE_TYPE_LABELS = {
+        "spelling": "ORTOGRAFIA",
+        "grammar": "GRAMATYKA",
+        "punctuation": "INTERPUNKCJA",
+        "diacritics": "DIAKRYTYKI",
+        "terminology": "TERMINOLOGIA",
+    }
+
+    lines.extend([
+        f"Jezyk:   {lr.detected_language_name} ({lr.detected_language})",
+        f"Jakosc:  {lr.overall_quality}",
+        f"Uwagi:   {lr.summary}",
+        "",
+    ])
+
+    if lr.issues:
+        lines.append(f"ZNALEZIONE PROBLEMY ({len(lr.issues)}):")
+        for li in lr.issues:
+            type_label = ISSUE_TYPE_LABELS.get(li.issue_type, li.issue_type)
+            lines.append(
+                f'  [{type_label}] "{li.original}" -> '
+                f'"{li.suggestion}" ({li.explanation})'
+            )
+    else:
+        lines.append("Brak bledow jezykowych.")
+
+    lines.extend([
+        "",
+        "=" * 60,
+        "Raport wygenerowany automatycznie. BULT Quality Check.",
         "=" * 60,
     ])
 

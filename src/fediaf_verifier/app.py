@@ -3,7 +3,6 @@
 import sys
 from pathlib import Path
 
-import anthropic
 import streamlit as st
 from loguru import logger
 
@@ -15,8 +14,9 @@ from fediaf_verifier.exceptions import (
     FediafVerifierError,
 )
 from fediaf_verifier.export import to_json, to_text
-from fediaf_verifier.models import EnrichedReport, ExtractionConfidence
-from fediaf_verifier.verifier import create_client, verify_label
+from fediaf_verifier.models import EnrichedReport, ExtractionConfidence, LinguisticCheckResult
+from fediaf_verifier.providers import AIProvider
+from fediaf_verifier.verifier import create_providers, verify_label, verify_linguistic_only
 
 # -- Logging setup ---------------------------------------------------------------------
 logger.remove()
@@ -164,17 +164,19 @@ try:
 except Exception as e:
     st.error(
         f"**B\u0142\u0105d konfiguracji:** {e}\n\n"
-        "Sprawdz plik `.env` \u2014 wymagany klucz `ANTHROPIC_API_KEY`."
+        "Sprawdz plik `.env` \u2014 wymagany klucz API dla wybranego providera."
     )
     st.stop()
 
 
 @st.cache_resource
-def _init_client(_api_key: str) -> anthropic.Anthropic:
-    return create_client(settings)
+def _init_providers(
+    _settings: AppSettings,
+) -> tuple[AIProvider, AIProvider]:
+    return create_providers(_settings)
 
 
-client = _init_client(settings.anthropic_api_key)
+extraction_provider, secondary_provider = _init_providers(settings)
 
 # -- Session state ---------------------------------------------------------------------
 if "report" not in st.session_state:
@@ -198,36 +200,60 @@ MARKETS = [
     "Hiszpania",
 ]
 
+_MODE_FULL = "Pe\u0142na weryfikacja"
+_MODE_LINGUISTIC = "Tylko weryfikacja j\u0119zykowa"
+
 with st.sidebar:
     st.header("Parametry weryfikacji")
 
-    market_selection = st.selectbox(
-        "Rynek docelowy",
-        options=MARKETS,
+    verification_mode = st.selectbox(
+        "Tryb weryfikacji",
+        [_MODE_FULL, _MODE_LINGUISTIC],
         help=(
-            "Opcjonalne. Dodaj kraj, a raport uwzgl\u0119dni aktualne "
-            "trendy rynkowe dla tej kategorii produktu."
+            "Pe\u0142na \u2014 analiza sk\u0142adu, FEDIAF, EU, opakowania + j\u0119zyk.\n"
+            "J\u0119zykowa \u2014 szybka kontrola ortografii i gramatyki."
         ),
     )
-    selected_market = None if market_selection == MARKETS[0] else market_selection
+    is_linguistic_only = verification_mode == _MODE_LINGUISTIC
 
-    if selected_market:
+    if is_linguistic_only:
+        selected_market = None
+    else:
+        market_selection = st.selectbox(
+            "Rynek docelowy",
+            options=MARKETS,
+            help=(
+                "Opcjonalne. Dodaj kraj, a raport uwzgl\u0119dni aktualne "
+                "trendy rynkowe dla tej kategorii produktu."
+            ),
+        )
+        selected_market = (
+            None if market_selection == MARKETS[0] else market_selection
+        )
+
+    if is_linguistic_only:
+        st.caption(
+            "Tryb j\u0119zykowy \u2014 szybka kontrola "
+            "ortografii, gramatyki i diakrytyk\u00f3w."
+        )
+    elif selected_market:
         st.info(f"Rynek docelowy: **{selected_market}**")
     else:
         st.caption("Weryfikacja obejmie wy\u0142\u0105cznie FEDIAF i regulacje EU.")
 
-    st.divider()
+    if not is_linguistic_only:
+        st.divider()
 
-    pdf_path = settings.fediaf_pdf_path
-    if not pdf_path.is_file():
-        _download_fediaf_pdf(pdf_path)
+        pdf_path = settings.fediaf_pdf_path
+        if not pdf_path.is_file():
+            _download_fediaf_pdf(pdf_path)
 
-    if pdf_path.is_file():
-        size_mb = pdf_path.stat().st_size / 1_048_576
-        st.success(f"FEDIAF Guidelines ({size_mb:.1f} MB) \u2713")
-    else:
-        st.error("Nie uda\u0142o si\u0119 pobra\u0107 FEDIAF Guidelines.")
-        st.stop()
+        if pdf_path.is_file():
+            size_mb = pdf_path.stat().st_size / 1_048_576
+            st.success(f"FEDIAF Guidelines ({size_mb:.1f} MB) \u2713")
+        else:
+            st.error("Nie uda\u0142o si\u0119 pobra\u0107 FEDIAF Guidelines.")
+            st.stop()
 
     st.divider()
     st.subheader("\U0001f4d6 Podr\u0119cznik u\u017cytkownika")
@@ -402,13 +428,20 @@ if uploaded:
     with col_info:
         st.markdown(f"**Plik:** {uploaded.name}")
         st.markdown(f"**Rozmiar:** {uploaded.size / 1024:.1f} KB")
-        st.markdown(f"**Rynek:** {selected_market or 'nie wybrano'}")
-        if selected_market:
-            st.caption(
-                "Analiza z wyszukiwaniem trend\u00f3w \u2014 ok. 60\u201390 sekund."
-            )
+        if is_linguistic_only:
+            st.markdown("**Tryb:** weryfikacja j\u0119zykowa")
+            st.caption("Szybka analiza tekstu \u2014 ok. 10\u201320 sekund.")
         else:
-            st.caption("Analiza bez trend\u00f3w \u2014 ok. 30\u201360 sekund.")
+            st.markdown(f"**Rynek:** {selected_market or 'nie wybrano'}")
+            if selected_market:
+                st.caption(
+                    "Analiza z wyszukiwaniem trend\u00f3w "
+                    "\u2014 ok. 60\u201390 sekund."
+                )
+            else:
+                st.caption(
+                    "Analiza bez trend\u00f3w \u2014 ok. 30\u201360 sekund."
+                )
 
 
 # -- Verification ---------------------------------------------------------------------
@@ -431,7 +464,8 @@ def _run_verification(uploaded_file, market: str | None) -> None:
                 label_b64=label_b64,
                 media_type=media_type,
                 settings=settings,
-                client=client,
+                extraction_provider=extraction_provider,
+                secondary_provider=secondary_provider,
                 market=market,
             )
         except ConfigurationError as e:
@@ -453,7 +487,43 @@ def _run_verification(uploaded_file, market: str | None) -> None:
     st.session_state.report_market = market
 
 
-if uploaded and st.button(
+def _run_linguistic_only(uploaded_file) -> None:
+    with st.spinner(
+        "Sprawdzam j\u0119zyk etykiety... (ok. 10\u201320 sekund)"
+    ):
+        try:
+            uploaded_file.seek(0)
+            label_b64, media_type = file_to_base64(
+                uploaded_file.read(), uploaded_file.name
+            )
+            result = verify_linguistic_only(
+                label_b64=label_b64,
+                media_type=media_type,
+                provider=secondary_provider,
+                settings=settings,
+            )
+        except ConversionError as e:
+            st.error(f"**B\u0142\u0105d pliku:** {e}")
+            return
+        except FediafVerifierError as e:
+            st.error(f"**B\u0142\u0105d API:** {e}")
+            return
+        except Exception as e:
+            st.error(f"**Nieoczekiwany b\u0142\u0105d:** {e}")
+            logger.exception("Unexpected error during linguistic check")
+            return
+
+    st.session_state.report = result
+    st.session_state.report_filename = uploaded_file.name
+    st.session_state.report_market = None
+
+
+if uploaded and is_linguistic_only and st.button(
+    "Sprawd\u017a j\u0119zyk", type="primary", use_container_width=True
+):
+    _run_linguistic_only(uploaded)
+
+if uploaded and not is_linguistic_only and st.button(
     "Sprawd\u017a etykiet\u0119", type="primary", use_container_width=True
 ):
     _run_verification(uploaded, selected_market)
@@ -909,10 +979,115 @@ def _render_report(
         )
 
 
+# -- Render linguistic-only report ----------------------------------------------------
+def _render_linguistic_report(
+    result: LinguisticCheckResult, filename: str,
+) -> None:
+    """Render standalone linguistic check results."""
+    st.divider()
+
+    if not result.performed or not result.report:
+        st.error(
+            f"**Weryfikacja j\u0119zykowa nie powiod\u0142a si\u0119.**\n\n"
+            f"{result.error or 'Nieznany b\u0142\u0105d.'}"
+        )
+        return
+
+    lr = result.report
+    issue_count = len(lr.issues)
+
+    # Quality banner
+    _QUALITY_MAP = {
+        "excellent": (
+            "success", "\u2705 Tekst bez b\u0142\u0119d\u00f3w "
+            "\u2014 profesjonalna jako\u015b\u0107."
+        ),
+        "good": (
+            "success", "\u2705 Tekst dobrej jako\u015bci "
+            "\u2014 drobne uwagi poni\u017cej."
+        ),
+        "needs_review": (
+            "warning", "\u26a0\ufe0f Tekst wymaga korekty "
+            "\u2014 przejrzyj uwagi poni\u017cej."
+        ),
+        "poor": (
+            "error", "\u26d4 Tekst wymaga gruntownej korekty "
+            "\u2014 liczne b\u0142\u0119dy."
+        ),
+    }
+    banner_type, banner_msg = _QUALITY_MAP.get(
+        lr.overall_quality, ("info", lr.overall_quality)
+    )
+    getattr(st, banner_type)(banner_msg)
+
+    # Metrics
+    mc1, mc2, mc3 = st.columns(3)
+    mc1.metric("J\u0119zyk", f"{lr.detected_language_name}")
+    mc2.metric("Jako\u015b\u0107", lr.overall_quality.upper())
+    mc3.metric("Problemy", str(issue_count))
+
+    if lr.summary:
+        st.caption(lr.summary)
+
+    # Issues
+    if lr.issues:
+        _ISSUE_ICONS = {
+            "spelling": "\U0001f4dd",
+            "grammar": "\U0001f4d6",
+            "punctuation": "\u270f\ufe0f",
+            "diacritics": "\U0001f524",
+            "terminology": "\U0001f500",
+        }
+        _ISSUE_LABELS = {
+            "spelling": "Ortografia",
+            "grammar": "Gramatyka",
+            "punctuation": "Interpunkcja",
+            "diacritics": "Diakrytyki",
+            "terminology": "Terminologia",
+        }
+        st.subheader("Znalezione problemy")
+        for li in lr.issues:
+            icon = _ISSUE_ICONS.get(li.issue_type, "\u2022")
+            label = _ISSUE_LABELS.get(li.issue_type, li.issue_type)
+            st.markdown(
+                f"{icon} **[{label}]** "
+                f"~~{li.original}~~ \u2192 **{li.suggestion}**  \n"
+                f'<span style="opacity:0.6;font-size:0.85rem;">'
+                f"{li.explanation}</span>",
+                unsafe_allow_html=True,
+            )
+    else:
+        st.success(
+            "Tekst na etykiecie bez b\u0142\u0119d\u00f3w "
+            "\u2014 profesjonalna jako\u015b\u0107."
+        )
+
+    # Export
+    from fediaf_verifier.export import linguistic_to_text
+
+    st.divider()
+    txt = linguistic_to_text(result, filename)
+    stem = Path(filename).stem
+    st.download_button(
+        "\u2b07\ufe0f Pobierz raport j\u0119zykowy (TXT)",
+        data=txt,
+        file_name=f"jezyk_{stem}.txt",
+        mime="text/plain",
+        use_container_width=True,
+    )
+
+
 # -- Render saved report ---------------------------------------------------------------
 if st.session_state.report is not None:
-    _render_report(
-        st.session_state.report,
-        st.session_state.report_filename,
-        st.session_state.report_market,
-    )
+    report = st.session_state.report
+    if isinstance(report, LinguisticCheckResult):
+        _render_linguistic_report(
+            report,
+            st.session_state.report_filename,
+        )
+    else:
+        _render_report(
+            report,
+            st.session_state.report_filename,
+            st.session_state.report_market,
+        )

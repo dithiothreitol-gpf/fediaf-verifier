@@ -8,7 +8,6 @@ Python: Merge into final EnrichedReport
 
 import json
 
-import anthropic
 from loguru import logger
 
 from fediaf_verifier.compliance import (
@@ -27,20 +26,55 @@ from fediaf_verifier.models import (
     LinguisticCheckResult,
     SecondaryCheck,
 )
-from fediaf_verifier.prompts import EXTRACTION_PROMPT, SECONDARY_CHECK_PROMPT
+from fediaf_verifier.prompts import (
+    EXTRACTION_PROMPT,
+    LINGUISTIC_ONLY_PROMPT,
+    SECONDARY_CHECK_PROMPT,
+)
+from fediaf_verifier.providers import (
+    AIProvider,
+    ProviderAPIError,
+    create_provider,
+)
 from fediaf_verifier.utils import api_call_with_retry, extract_json
 
 
-def create_client(settings: AppSettings) -> anthropic.Anthropic:
-    """Create Anthropic client from settings."""
-    return anthropic.Anthropic(api_key=settings.anthropic_api_key)
+def create_providers(
+    settings: AppSettings,
+) -> tuple[AIProvider, AIProvider]:
+    """Create provider instances for extraction and secondary check."""
+    extraction_key = _get_api_key(settings, settings.extraction_provider)
+    secondary_key = _get_api_key(settings, settings.secondary_provider)
+
+    extraction_provider = create_provider(
+        settings.extraction_provider,
+        extraction_key,
+        settings.extraction_model,
+    )
+    secondary_provider = create_provider(
+        settings.secondary_provider,
+        secondary_key,
+        settings.secondary_model,
+    )
+    return extraction_provider, secondary_provider
+
+
+def _get_api_key(settings: AppSettings, provider: str) -> str:
+    """Get API key for a given provider name."""
+    if provider == "anthropic":
+        return settings.anthropic_api_key
+    if provider == "gemini":
+        return settings.gemini_api_key
+    msg = f"Nieznany provider: {provider}"
+    raise APIError(msg)
 
 
 def verify_label(
     label_b64: str,
     media_type: str,
     settings: AppSettings,
-    client: anthropic.Anthropic,
+    extraction_provider: AIProvider,
+    secondary_provider: AIProvider,
     fediaf_b64: str = "",
     market: str | None = None,
 ) -> EnrichedReport:
@@ -50,82 +84,90 @@ def verify_label(
         label_b64: Label image/document encoded as base64.
         media_type: MIME type of the label.
         settings: Application settings.
-        client: Anthropic client instance.
+        extraction_provider: AI provider for data extraction (Call 1).
+        secondary_provider: AI provider for cross-check + linguistic (Call 2).
         fediaf_b64: Unused (kept for API compat). FEDIAF tables in prompt.
         market: Target market country or None.
 
     Returns:
         EnrichedReport with all analysis results.
     """
-    # -- CALL 1: Extract raw data from label -------------------------------------------
+    # -- CALL 1: Extract raw data from label -----------------------------------
     logger.info("Call 1: Extracting label data...")
-    extraction = _extract_label_data(label_b64, media_type, client, settings)
+    extraction = _extract_label_data(
+        label_b64, media_type, extraction_provider, settings
+    )
 
-    # -- PYTHON: Deterministic compliance analysis -------------------------------------
+    # -- PYTHON: Deterministic compliance analysis -----------------------------
     logger.info("Running deterministic compliance analysis...")
     compliance = analyze_compliance(extraction)
 
-    # -- CALL 2: Cross-check + linguistic (with rate limit retry) ----------------------
+    # -- CALL 2: Cross-check + linguistic (with rate limit retry) --------------
     logger.info("Call 2: Cross-check + linguistic verification...")
-    secondary = _secondary_check(label_b64, media_type, client, settings)
+    secondary = _secondary_check(
+        label_b64, media_type, secondary_provider, settings
+    )
 
-    # -- PYTHON: Build final report ----------------------------------------------------
+    # -- PYTHON: Build final report --------------------------------------------
     return _build_enriched_report(extraction, compliance, secondary, settings)
 
 
-# -- Call 1: Extraction ----------------------------------------------------------------
+def verify_linguistic_only(
+    label_b64: str,
+    media_type: str,
+    provider: AIProvider,
+    settings: AppSettings,
+) -> LinguisticCheckResult:
+    """Standalone linguistic verification — no FEDIAF/EU analysis.
+
+    Single AI call focused exclusively on language quality.
+    """
+    logger.info("Linguistic-only verification...")
+
+    def _call() -> LinguisticCheckResult:
+        raw_text = provider.call(
+            prompt=LINGUISTIC_ONLY_PROMPT,
+            media_b64=label_b64,
+            media_type=media_type,
+            max_tokens=settings.max_tokens_linguistic,
+        )
+
+        json_text = extract_json(raw_text)
+        data = json.loads(json_text)
+
+        from fediaf_verifier.models import LinguisticReport
+
+        report = LinguisticReport.model_validate(data)
+        return LinguisticCheckResult(performed=True, report=report)
+
+    try:
+        return api_call_with_retry(_call)
+    except Exception as e:
+        logger.error("Linguistic-only check failed: {}", e)
+        return LinguisticCheckResult(
+            performed=False, error=f"Blad weryfikacji jezykowej: {e}"
+        )
 
 
-def _build_label_block(label_b64: str, media_type: str) -> dict:
-    """Build content block for label (image or document)."""
-    if media_type == "application/pdf":
-        return {
-            "type": "document",
-            "source": {
-                "type": "base64",
-                "media_type": media_type,
-                "data": label_b64,
-            },
-        }
-    return {
-        "type": "image",
-        "source": {
-            "type": "base64",
-            "media_type": media_type,
-            "data": label_b64,
-        },
-    }
+# -- Call 1: Extraction --------------------------------------------------------
 
 
 def _extract_label_data(
     label_b64: str,
     media_type: str,
-    client: anthropic.Anthropic,
+    provider: AIProvider,
     settings: AppSettings,
 ) -> LabelExtraction:
     """Call 1: Extract all visible data from label. No compliance judgments."""
-    label_block = _build_label_block(label_b64, media_type)
 
     def _call() -> LabelExtraction:
-        response = client.messages.create(
-            model=settings.anthropic_model,
+        raw_text = provider.call(
+            prompt=EXTRACTION_PROMPT,
+            media_b64=label_b64,
+            media_type=media_type,
             max_tokens=settings.max_tokens_main,
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        label_block,
-                        {"type": "text", "text": EXTRACTION_PROMPT},
-                    ],
-                }
-            ],
         )
 
-        text_blocks = [b.text for b in response.content if hasattr(b, "text")]
-        if not text_blocks:
-            raise APIError("API nie zwrocilo tekstu w odpowiedzi.")
-
-        raw_text = text_blocks[-1]
         json_text = extract_json(raw_text)
         data = json.loads(json_text)
 
@@ -142,15 +184,15 @@ def _extract_label_data(
                     "polish_text_complete",
                 )
             ) and isinstance(val, str):
-                    data[key] = val.lower().strip() in (
-                        "true", "yes", "tak", "1", "present",
-                    )
+                data[key] = val.lower().strip() in (
+                    "true", "yes", "tak", "1", "present",
+                )
 
         return LabelExtraction.model_validate(data)
 
     try:
         return api_call_with_retry(_call)
-    except anthropic.APIError as e:
+    except ProviderAPIError as e:
         logger.error("Extraction API call failed: {}", e)
         raise APIError(f"Blad API podczas ekstrakcji: {e}") from e
     except Exception as e:
@@ -161,38 +203,25 @@ def _extract_label_data(
         ) from e
 
 
-# -- Call 2: Secondary check (cross-check + linguistic) --------------------------------
+# -- Call 2: Secondary check (cross-check + linguistic) ------------------------
 
 
 def _secondary_check(
     label_b64: str,
     media_type: str,
-    client: anthropic.Anthropic,
+    provider: AIProvider,
     settings: AppSettings,
 ) -> SecondaryCheck | None:
     """Call 2: Cross-check nutrients + linguistic verification. Non-blocking."""
-    label_block = _build_label_block(label_b64, media_type)
 
     def _call() -> SecondaryCheck:
-        response = client.messages.create(
-            model=settings.anthropic_model,
+        raw_text = provider.call(
+            prompt=SECONDARY_CHECK_PROMPT,
+            media_b64=label_b64,
+            media_type=media_type,
             max_tokens=settings.max_tokens_linguistic,
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        label_block,
-                        {"type": "text", "text": SECONDARY_CHECK_PROMPT},
-                    ],
-                }
-            ],
         )
 
-        text_blocks = [b.text for b in response.content if hasattr(b, "text")]
-        if not text_blocks:
-            raise APIError("API nie zwrocilo tekstu.")
-
-        raw_text = text_blocks[-1]
         json_text = extract_json(raw_text)
         data = json.loads(json_text)
         return SecondaryCheck.model_validate(data)
@@ -204,7 +233,7 @@ def _secondary_check(
         return None
 
 
-# -- Build final report ----------------------------------------------------------------
+# -- Build final report --------------------------------------------------------
 
 
 def _build_enriched_report(
@@ -263,7 +292,9 @@ def _build_enriched_report(
         packaging_check=compliance.packaging,
         recommendations=compliance.recommendations,
         market_trends=None,  # TODO: market trends as separate optional call
-        hard_rule_flags=[i for i in compliance.issues if i.source == "HARD_RULE"],
+        hard_rule_flags=[
+            i for i in compliance.issues if i.source == "HARD_RULE"
+        ],
         cross_check_result=cross_result,
         linguistic_check_result=linguistic_result,
         reliability_flags=reliability_flags,

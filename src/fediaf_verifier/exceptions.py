@@ -26,7 +26,7 @@ class LibreOfficeNotFoundError(ConversionError):
 
 
 class APIError(FediafVerifierError):
-    """Anthropic API call failed."""
+    """AI provider API call failed."""
 
 
 class CrossCheckError(APIError):

@@ -5,6 +5,7 @@ description = "Pet food label verifier against FEDIAF 2021 + EU 767/2009"
 requires-python = ">=3.12"
 dependencies = [
     "anthropic>=0.85.0",
+    "google-genai>=1.0.0",
     "streamlit>=1.55.0",
     "pydantic>=2.12.5",
     "pydantic-settings>=2.13.1",

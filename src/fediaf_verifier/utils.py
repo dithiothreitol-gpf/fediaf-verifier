@@ -7,8 +7,9 @@ import time
 from collections.abc import Callable
 from typing import Any
 
-import anthropic
 from loguru import logger
+
+from fediaf_verifier.providers import ProviderRateLimitError
 
 _JSON_FENCE_RE = re.compile(r"```(?:json)?\s*\n(.*?)\n\s*```", re.DOTALL)
 
@@ -232,13 +233,12 @@ def api_call_with_retry[T](
         Result of fn().
 
     Raises:
-        anthropic.RateLimitError: If all retries exhausted.
-        anthropic.APIError: For non-rate-limit API errors (no retry).
+        ProviderRateLimitError: If all retries exhausted.
     """
     for attempt in range(max_retries):
         try:
             return fn()
-        except anthropic.RateLimitError:
+        except ProviderRateLimitError:
             if attempt == max_retries - 1:
                 raise
             delay = base_delay * (2**attempt)  # 15s, 30s, 60s
