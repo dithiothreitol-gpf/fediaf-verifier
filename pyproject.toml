@@ -6,6 +6,7 @@ requires-python = ">=3.12"
 dependencies = [
     "anthropic>=0.85.0",
     "google-genai>=1.0.0",
+    "openai>=1.60.0",
     "streamlit>=1.55.0",
     "pydantic>=2.12.5",
     "pydantic-settings>=2.13.1",
@@ -16,6 +17,9 @@ dependencies = [
 [project.optional-dependencies]
 docx-convert = [
     "pdf2image>=1.17.0",
+]
+annotation = [
+    "pymupdf>=1.25.0",
 ]
 
 [dependency-groups]

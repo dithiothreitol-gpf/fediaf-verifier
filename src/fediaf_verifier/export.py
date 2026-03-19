@@ -1,7 +1,11 @@
 """Report export — JSON and TXT formatters."""
 
 
-from fediaf_verifier.models import EnrichedReport, LinguisticCheckResult
+from fediaf_verifier.models import (
+    EnrichedReport,
+    LabelStructureCheckResult,
+    LinguisticCheckResult,
+)
 
 
 def to_json(report: EnrichedReport) -> str:
@@ -268,6 +272,128 @@ def linguistic_to_text(result: LinguisticCheckResult, filename: str) -> str:
 
     lines.extend([
         "",
+        "=" * 60,
+        "Raport wygenerowany automatycznie. BULT Quality Check.",
+        "=" * 60,
+    ])
+
+    return "\n".join(lines)
+
+
+def structure_to_text(
+    result: LabelStructureCheckResult, filename: str,
+) -> str:
+    """Format label structure & font check as human-readable text."""
+    lines = [
+        "=" * 60,
+        "KONTROLA STRUKTURY ETYKIETY I CZCIONKI",
+        "BULT Quality Check",
+        "=" * 60,
+        f"Plik: {filename}",
+        "",
+    ]
+
+    if not result.performed or not result.report:
+        lines.append(
+            f"Kontrola nie powiodla sie: {result.error or 'nieznany blad'}"
+        )
+        return "\n".join(lines)
+
+    r = result.report
+
+    STATUS_LABELS = {
+        "ok": "OK — brak problemow",
+        "warnings": "OSTRZEZENIA — wykryto potencjalne problemy",
+        "errors": "BLEDY — wymagana korekta",
+    }
+    lines.extend([
+        f"Status: {STATUS_LABELS.get(r.overall_status, r.overall_status)}",
+        f"Sekcji jezykowych: {r.section_count}",
+        f"Problemow z czcionka: {r.font_issues_count}",
+        f"Podsumowanie: {r.summary}",
+        "",
+    ])
+
+    # Language sections
+    if r.language_sections:
+        lines.append("SEKCJE JEZYKOWE:")
+        lines.append("-" * 40)
+        for sec in r.language_sections:
+            marker_info = (
+                f"{sec.marker_type}: \"{sec.marker_text}\""
+                if sec.marker_present
+                else "BRAK MARKERA"
+            )
+            lines.append(
+                f"  [{sec.language_code.upper()}] {sec.language_name} "
+                f"— marker: {marker_info}"
+            )
+            lines.append(
+                f"    Tresc: {'obecna' if sec.content_present else 'BRAK'} | "
+                f"Kompletna: {'tak' if sec.content_complete else 'NIE'}"
+            )
+            if sec.section_elements:
+                lines.append(
+                    f"    Elementy: {', '.join(sec.section_elements)}"
+                )
+            if sec.missing_elements:
+                lines.append(
+                    f"    BRAKUJE: {', '.join(sec.missing_elements)}"
+                )
+            if sec.notes:
+                lines.append(f"    Uwagi: {sec.notes}")
+        lines.append("")
+
+    # Diacritics check
+    if r.diacritics_check:
+        lines.append("KOMPLETNOSC DIAKRYTYKOW (per jezyk):")
+        for lang, ok in r.diacritics_check.items():
+            icon = "OK" if ok else "PROBLEM"
+            lines.append(f"  [{icon}] {lang.upper()}")
+        lines.append("")
+
+    # Structure issues
+    if r.structure_issues:
+        lines.append(f"PROBLEMY STRUKTURALNE ({len(r.structure_issues)}):")
+        lines.append("-" * 40)
+        SEV_MAP = {
+            "critical": "KRYTYCZNY",
+            "warning": "OSTRZEZENIE",
+            "info": "INFO",
+        }
+        for si in r.structure_issues:
+            sev = SEV_MAP.get(si.severity, si.severity.upper())
+            langs = ", ".join(si.affected_languages) if si.affected_languages else "—"
+            lines.append(f"  [{sev}] {si.description}")
+            lines.append(f"    Typ: {si.issue_type} | Jezyki: {langs}")
+            if si.location:
+                lines.append(f"    Lokalizacja: {si.location}")
+        lines.append("")
+
+    # Glyph/font issues
+    if r.glyph_issues:
+        lines.append(f"PROBLEMY Z CZCIONKA/GLIFAMI ({len(r.glyph_issues)}):")
+        lines.append("-" * 40)
+        for gi in r.glyph_issues:
+            lines.append(
+                f"  [{gi.language_code.upper()}] {gi.issue_type}: "
+                f"\"{gi.affected_text}\" -> \"{gi.expected_text}\""
+            )
+            if gi.missing_characters:
+                lines.append(
+                    f"    Brakujace znaki: {' '.join(gi.missing_characters)}"
+                )
+            if gi.location:
+                lines.append(f"    Lokalizacja: {gi.location}")
+            if gi.explanation:
+                lines.append(f"    Wyjasnienie: {gi.explanation}")
+        lines.append("")
+
+    if not r.structure_issues and not r.glyph_issues:
+        lines.append("Nie wykryto problemow strukturalnych ani z czcionka.")
+        lines.append("")
+
+    lines.extend([
         "=" * 60,
         "Raport wygenerowany automatycznie. BULT Quality Check.",
         "=" * 60,

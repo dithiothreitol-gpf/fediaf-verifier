@@ -87,6 +87,91 @@ issue_type: "spelling"/"grammar"/"punctuation"/"diacritics"/"terminology",
 overall_quality ("excellent"/"good"/"needs_review"/"poor"),
 summary (krotkie podsumowanie jakosci tekstu)."""
 
+# -- Label structure & font completeness check prompt ---------------------------------
+
+LABEL_STRUCTURE_PROMPT = """\
+Przeanalizuj etykiete karmy dla zwierzat pod katem STRUKTURY SEKCJI JEZYKOWYCH \
+oraz KOMPLETNOSCI ZNAKOW W CZCIONCE.
+
+KONTEKST: Etykiety wielojezykowe tworzone sa w Adobe Illustratorze. \
+Kazdy jezyk ma oddzielna sekcje oznaczona markerem jezykowym \
+(flaga, kod kraju np. PL/DE/EN/FR/CZ/HU/RO, ikona lub tekst). \
+Podczas edycji czesto zdarzaja sie bledy: gina markery, pojawiaja sie luki, \
+tekst z jednej sekcji "wlewa sie" do drugiej, a czcionka moze nie miec \
+wszystkich znakow diakrytycznych — powodujac puste miejsca, "kwadraciki" (tofu) \
+lub brakujace znaki.
+
+ZADANIE 1 — STRUKTURA SEKCJI JEZYKOWYCH:
+Dla KAZDEJ sekcji jezykowej widocznej na etykiecie podaj:
+- Kod jezyka (ISO 639-1)
+- Pelna nazwa jezyka
+- Czy marker/emblemat jezykowy jest widoczny i jaki jest (flaga, kod, tekst, ikona)
+- Dokladny tekst/opis markera tak jak widoczny na etykiecie
+- Czy sekcja zawiera tresc (content_present)
+- Czy tresc wyglada na kompletna (content_complete)
+- Jakie elementy etykiety sa obecne w danej sekcji \
+(ingredients, analytical_constituents, feeding_guidelines, \
+storage_instructions, manufacturer_info, product_description, warnings)
+- Jakie elementy BRAKUJA w tej sekcji ale sa obecne w innych sekcjach
+Szukaj takze:
+- Tekstu "osieroconego" — fragmentow miedzy sekcjami nie przypisanych do zadnego jezyka
+- Uszkodzonych/nieczytelnych markerow
+- Niespojnego porzadku sekcji (np. DE ma inne elementy niz PL)
+- Brakujacych sekcji jezykowych (marker jest ale brak tresci lub odwrotnie)
+- Duplikatow markerow
+
+ZADANIE 2 — KOMPLETNOSC ZNAKOW W CZCIONCE:
+Sprawdz KAZDA sekcje jezykowa pod katem znakow specjalnych/diakrytycznych:
+- POLSKI: ą ę ś ć ź ż ł ń ó Ą Ę Ś Ć Ź Ż Ł Ń Ó
+- NIEMIECKI: ä ö ü ß Ä Ö Ü
+- CZESKI: ř š č ž ů ú ý á é í ě ň ť ď Ř Š Č Ž
+- WEGIERSKI: á é í ó ö ő ú ü ű Á É Í Ó Ö Ő Ú Ü Ű
+- RUMUNSKI: ă â î ș ț Ă Â Î Ș Ț
+- FRANCUSKI: é è ê ë à â ù û ç ô î ï É È Ê Ë À Â
+- WLOSKI: à è é ì ò ù À È É Ì Ò Ù
+- HISZPANSKI: ñ á é í ó ú ü Ñ Á É Í Ó Ú Ü ¿ ¡
+Dla kazdego jezyka sprawdz czy:
+- Znaki diakrytyczne sa WIDOCZNE i poprawnie wyrenderowane
+- Nie ma "kwadracikow" (tofu/missing glyph boxes) zamiast znakow
+- Nie ma pustych miejsc / luk tam gdzie powinien byc znak diakrytyczny
+- Nie ma zamiany znakow diakrytycznych na ich podstawowe odpowiedniki \
+(np. "a" zamiast "ą", "s" zamiast "ś")
+- Nie ma bledow enkodowania (np. "Ä…" zamiast "ą", "Å›" zamiast "ś")
+
+ZADANIE 3 — LOKALIZACJA PROBLEMOW (WSPOLRZEDNE):
+Dla KAZDEGO wykrytego problemu (structure_issues i glyph_issues) podaj \
+przyblizone wspolrzedne prostokatu (bounding box) na obrazie etykiety. \
+Wspolrzedne podawaj jako wartosci ZNORMALIZOWANE 0-1000, gdzie:
+- (0, 0) = lewy gorny rog obrazu
+- (1000, 1000) = prawy dolny rog obrazu
+- bbox = [x, y, width, height] — x,y to lewy gorny rog prostokata
+Jesli nie mozesz dokladnie okreslic pozycji — podaj najlepsza przyblizenie. \
+Jesli w ogole nie jestes w stanie — podaj null.
+
+Odpowiedz WYLACZNIE poprawnym JSON (bez markdown). Pola:
+languages_expected (lista kodow jezykow wykrytych na etykiecie),
+language_sections (lista: [{language_code, language_name, marker_present, \
+marker_type ("flag"/"code"/"text"/"icon"/"none"), marker_text, \
+content_present, content_complete, \
+section_elements (lista), missing_elements (lista), notes, \
+bbox ([x, y, w, h] znormalizowane 0-1000 lub null)}]),
+structure_issues (lista: [{issue_type \
+("missing_marker"/"orphaned_text"/"section_overlap"/"section_gap"/\
+"marker_damaged"/"inconsistent_order"/"missing_section"/"duplicate_marker"), \
+description, affected_languages (lista kodow), \
+severity ("critical"/"warning"/"info"), location, \
+bbox ([x, y, w, h] znormalizowane 0-1000 lub null)}]),
+glyph_issues (lista: [{language_code, \
+issue_type ("missing_glyph"/"substituted_glyph"/"blank_space"/\
+"tofu_box"/"wrong_diacritic"/"encoding_error"), \
+affected_text, expected_text, missing_characters (lista), location, explanation, \
+bbox ([x, y, w, h] znormalizowane 0-1000 lub null)}]),
+diacritics_check (obiekt: kod_jezyka -> bool, np. {"pl": false, "de": true}),
+overall_status ("ok"/"warnings"/"errors"),
+summary (krotkie podsumowanie po polsku),
+section_count (ile sekcji jezykowych),
+font_issues_count (ile problemow z czcionka/glifami)."""
+
 # -- Market trends prompt (optional, uses web_search) ---------------------------------
 
 

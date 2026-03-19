@@ -28,6 +28,7 @@ from fediaf_verifier.models import (
 )
 from fediaf_verifier.prompts import (
     EXTRACTION_PROMPT,
+    LABEL_STRUCTURE_PROMPT,
     LINGUISTIC_ONLY_PROMPT,
     SECONDARY_CHECK_PROMPT,
 )
@@ -65,6 +66,8 @@ def _get_api_key(settings: AppSettings, provider: str) -> str:
         return settings.anthropic_api_key
     if provider == "gemini":
         return settings.gemini_api_key
+    if provider == "openai":
+        return settings.openai_api_key
     msg = f"Nieznany provider: {provider}"
     raise APIError(msg)
 
@@ -110,6 +113,47 @@ def verify_label(
 
     # -- PYTHON: Build final report --------------------------------------------
     return _build_enriched_report(extraction, compliance, secondary, settings)
+
+
+def verify_label_structure(
+    label_b64: str,
+    media_type: str,
+    provider: AIProvider,
+    settings: AppSettings,
+) -> "LabelStructureCheckResult":
+    """Standalone label structure & font completeness check.
+
+    Single AI call focused on language section structure and glyph issues.
+    """
+    from fediaf_verifier.models.label_structure import (
+        LabelStructureCheckResult,
+        LabelStructureReport,
+    )
+
+    logger.info("Label structure & font check...")
+
+    def _call() -> LabelStructureCheckResult:
+        raw_text = provider.call(
+            prompt=LABEL_STRUCTURE_PROMPT,
+            media_b64=label_b64,
+            media_type=media_type,
+            max_tokens=settings.max_tokens_linguistic,
+        )
+
+        json_text = extract_json(raw_text)
+        data = json.loads(json_text)
+
+        report = LabelStructureReport.model_validate(data)
+        return LabelStructureCheckResult(performed=True, report=report)
+
+    try:
+        return api_call_with_retry(_call)
+    except Exception as e:
+        logger.error("Label structure check failed: {}", e)
+        return LabelStructureCheckResult(
+            performed=False,
+            error=f"Blad kontroli struktury etykiety: {e}",
+        )
 
 
 def verify_linguistic_only(

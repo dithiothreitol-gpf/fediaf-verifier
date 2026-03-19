@@ -4,6 +4,13 @@ from .cross_check import CrossCheckResult, Discrepancy
 from .eu_labelling import EULabellingCheck
 from .extraction import LabelExtraction, SecondaryCheck
 from .issues import Issue, Severity
+from .label_structure import (
+    GlyphIssue,
+    LabelStructureCheckResult,
+    LabelStructureReport,
+    LanguageSectionInfo,
+    StructureIssue,
+)
 from .linguistic import (
     LinguisticCheckResult,
     LinguisticIssue,
@@ -30,8 +37,12 @@ __all__ = [
     "EnrichedReport",
     "ExtractionConfidence",
     "FoodType",
+    "GlyphIssue",
     "Issue",
     "LabelExtraction",
+    "LabelStructureCheckResult",
+    "LabelStructureReport",
+    "LanguageSectionInfo",
     "Lifestage",
     "LinguisticCheckResult",
     "LinguisticIssue",
@@ -47,5 +58,6 @@ __all__ = [
     "SecondaryCheck",
     "Severity",
     "Species",
+    "StructureIssue",
     "VerificationReport",
 ]

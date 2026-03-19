@@ -27,6 +27,7 @@ class AppSettings(BaseSettings):
     # -- API keys (provide at least one for the providers you use) --
     anthropic_api_key: str = ""
     gemini_api_key: str = ""
+    openai_api_key: str = ""
 
     # -- Per-task provider + model configuration --
     extraction_provider: str = "anthropic"
@@ -71,6 +72,11 @@ class AppSettings(BaseSettings):
             raise ValueError(
                 "GEMINI_API_KEY wymagany — extraction_provider lub "
                 "secondary_provider ustawiony na 'gemini'."
+            )
+        if "openai" in providers_needed and not self.openai_api_key:
+            raise ValueError(
+                "OPENAI_API_KEY wymagany — extraction_provider lub "
+                "secondary_provider ustawiony na 'openai'."
             )
         return self
 

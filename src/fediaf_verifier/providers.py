@@ -1,8 +1,8 @@
 """AI provider abstraction layer.
 
-Supports Anthropic (Claude) and Google (Gemini) as interchangeable backends.
-Each provider implements the same ``call`` interface, so the verification
-pipeline is model-agnostic.
+Supports Anthropic (Claude), Google (Gemini), and OpenAI (GPT) as
+interchangeable backends.  Each provider implements the same ``call``
+interface, so the verification pipeline is model-agnostic.
 """
 
 from __future__ import annotations
@@ -20,6 +20,11 @@ try:
 except ImportError:  # pragma: no cover
     genai = None  # type: ignore[assignment]
     genai_types = None  # type: ignore[assignment]
+
+try:
+    import openai as _openai
+except ImportError:  # pragma: no cover
+    _openai = None  # type: ignore[assignment]
 
 if TYPE_CHECKING:
     pass
@@ -222,11 +227,80 @@ class GeminiProvider:
         return raw
 
 
+# -- OpenAI --------------------------------------------------------------------
+
+
+class OpenAIProvider:
+    """OpenAI GPT provider (GPT-5.4 family)."""
+
+    def __init__(self, api_key: str, model: str) -> None:
+        if _openai is None:
+            raise ConfigurationError(
+                "Pakiet 'openai' jest wymagany dla providera OpenAI. "
+                "Zainstaluj: pip install openai"
+            )
+        self._client = _openai.OpenAI(api_key=api_key)
+        self._model = model
+
+    def call(
+        self,
+        prompt: str,
+        media_b64: str,
+        media_type: str,
+        max_tokens: int,
+    ) -> str:
+        image_url = f"data:{media_type};base64,{media_b64}"
+
+        try:
+            response = self._client.chat.completions.create(
+                model=self._model,
+                max_tokens=max_tokens,
+                response_format={"type": "json_object"},
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": image_url, "detail": "high"},
+                            },
+                            {"type": "text", "text": prompt},
+                        ],
+                    }
+                ],
+            )
+        except _openai.RateLimitError as e:
+            raise ProviderRateLimitError(str(e)) from e
+        except _openai.APIError as e:
+            raise ProviderAPIError(str(e)) from e
+
+        choice = response.choices[0]
+        raw = choice.message.content or ""
+
+        if not raw:
+            raise ProviderAPIError("OpenAI nie zwrocilo tekstu w odpowiedzi.")
+
+        # Detect truncated response
+        if choice.finish_reason == "length":
+            from fediaf_verifier.utils import repair_truncated_json
+
+            repaired = repair_truncated_json(raw)
+            if repaired is not None:
+                return repaired
+            raise ProviderAPIError(
+                "Odpowiedz AI zostala ucieta (za dluga). "
+                "Sprobuj ponownie lub zmniejsz zlozonosc etykiety."
+            )
+
+        return raw
+
+
 # -- Factory -------------------------------------------------------------------
 
 _PROVIDER_REGISTRY: dict[str, type] = {
     "anthropic": AnthropicProvider,
     "gemini": GeminiProvider,
+    "openai": OpenAIProvider,
 }
 
 

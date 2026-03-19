@@ -13,10 +13,20 @@ from fediaf_verifier.exceptions import (
     ConversionError,
     FediafVerifierError,
 )
-from fediaf_verifier.export import to_json, to_text
-from fediaf_verifier.models import EnrichedReport, ExtractionConfidence, LinguisticCheckResult
+from fediaf_verifier.export import structure_to_text, to_json, to_text
+from fediaf_verifier.models import (
+    EnrichedReport,
+    ExtractionConfidence,
+    LabelStructureCheckResult,
+    LinguisticCheckResult,
+)
 from fediaf_verifier.providers import AIProvider
-from fediaf_verifier.verifier import create_providers, verify_label, verify_linguistic_only
+from fediaf_verifier.verifier import (
+    create_providers,
+    verify_label,
+    verify_label_structure,
+    verify_linguistic_only,
+)
 
 # -- Logging setup ---------------------------------------------------------------------
 logger.remove()
@@ -185,6 +195,10 @@ if "report_filename" not in st.session_state:
     st.session_state.report_filename = ""
 if "report_market" not in st.session_state:
     st.session_state.report_market = None
+if "structure_file_bytes" not in st.session_state:
+    st.session_state.structure_file_bytes = None
+if "structure_media_type" not in st.session_state:
+    st.session_state.structure_media_type = ""
 
 # -- Sidebar ---------------------------------------------------------------------------
 MARKETS = [
@@ -202,21 +216,25 @@ MARKETS = [
 
 _MODE_FULL = "Pe\u0142na weryfikacja"
 _MODE_LINGUISTIC = "Tylko weryfikacja j\u0119zykowa"
+_MODE_STRUCTURE = "Kontrola struktury i czcionki"
 
 with st.sidebar:
     st.header("Parametry weryfikacji")
 
     verification_mode = st.selectbox(
         "Tryb weryfikacji",
-        [_MODE_FULL, _MODE_LINGUISTIC],
+        [_MODE_FULL, _MODE_LINGUISTIC, _MODE_STRUCTURE],
         help=(
             "Pe\u0142na \u2014 analiza sk\u0142adu, FEDIAF, EU, opakowania + j\u0119zyk.\n"
-            "J\u0119zykowa \u2014 szybka kontrola ortografii i gramatyki."
+            "J\u0119zykowa \u2014 szybka kontrola ortografii i gramatyki.\n"
+            "Struktura \u2014 kontrola sekcji j\u0119zykowych, marker\u00f3w "
+            "i kompletno\u015bci znak\u00f3w w czcionce."
         ),
     )
     is_linguistic_only = verification_mode == _MODE_LINGUISTIC
+    is_structure_check = verification_mode == _MODE_STRUCTURE
 
-    if is_linguistic_only:
+    if is_linguistic_only or is_structure_check:
         selected_market = None
     else:
         market_selection = st.selectbox(
@@ -231,7 +249,12 @@ with st.sidebar:
             None if market_selection == MARKETS[0] else market_selection
         )
 
-    if is_linguistic_only:
+    if is_structure_check:
+        st.caption(
+            "Tryb struktury \u2014 kontrola sekcji j\u0119zykowych, "
+            "marker\u00f3w i kompletno\u015bci znak\u00f3w w czcionce."
+        )
+    elif is_linguistic_only:
         st.caption(
             "Tryb j\u0119zykowy \u2014 szybka kontrola "
             "ortografii, gramatyki i diakrytyk\u00f3w."
@@ -241,7 +264,7 @@ with st.sidebar:
     else:
         st.caption("Weryfikacja obejmie wy\u0142\u0105cznie FEDIAF i regulacje EU.")
 
-    if not is_linguistic_only:
+    if not is_linguistic_only and not is_structure_check:
         st.divider()
 
         pdf_path = settings.fediaf_pdf_path
@@ -258,8 +281,30 @@ with st.sidebar:
     st.divider()
     st.subheader("\U0001f4d6 Podr\u0119cznik u\u017cytkownika")
 
+    # -- "Jak zacz\u0105\u0107?" — depends on mode --
     with st.expander("Jak zacz\u0105\u0107?"):
-        st.markdown("""\
+        if is_structure_check:
+            st.markdown("""\
+1. **Wgraj etykiet\u0119** \u2014 JPG, PNG lub PDF (eksport z Illustratora)
+2. **Kliknij "Sprawd\u017a struktur\u0119"** \u2014 analiza trwa 15\u201330 sekund
+3. **Przejrzyj raport** \u2014 sekcje j\u0119zykowe, markery, problemy z czcionk\u0105
+4. **Pobierz wyniki:**
+   - **Raport TXT** \u2014 tekstowe podsumowanie do wydruku
+   - **Skrypt .jsx** \u2014 otw\u00f3rz etykiet\u0119 w Illustratorze, \
+potem File > Scripts > Other Script > wybierz plik. \
+System doda warstw\u0119 "QC Annotations" z kolorowymi oznaczeniami
+   - **Etykieta z oznaczeniami** \u2014 kopia PDF/PNG z naniesionymi \
+prostok\u0105tami (dost\u0119pna dla plik\u00f3w PDF i obraz\u00f3w)
+""")
+        elif is_linguistic_only:
+            st.markdown("""\
+1. **Wgraj etykiet\u0119** \u2014 JPG, PNG, PDF lub DOCX
+2. **Kliknij "Sprawd\u017a j\u0119zyk"** \u2014 analiza trwa 10\u201320 sekund
+3. **Przejrzyj wynik** \u2014 lista b\u0142\u0119d\u00f3w z sugestiami poprawek
+4. **Pobierz raport TXT** \u2014 do wydruku lub przekazania grafikowi
+""")
+        else:
+            st.markdown("""\
 1. **Wgraj etykiet\u0119** \u2014 przeci\u0105gnij plik lub kliknij przycisk uploadu
 2. **Wybierz rynek** \u2014 opcjonalnie, je\u015bli chcesz analiz\u0119 trend\u00f3w
 3. **Kliknij "Sprawd\u017a etykiet\u0119"** \u2014 analiza trwa 30\u201390 sekund
@@ -267,22 +312,101 @@ with st.sidebar:
 5. **Pobierz raport** \u2014 JSON (do systemu) lub TXT (do wydruku)
 """)
 
+    # -- Formaty plik\u00f3w — shared, with mode-specific tips --
     with st.expander("Obs\u0142ugiwane formaty plik\u00f3w"):
         st.markdown("""\
 | Format | Opis |
 |--------|------|
 | **JPG / PNG** | Zdj\u0119cie etykiety (najlepiej ca\u0142a etykieta, dobra ostro\u015b\u0107) |
-| **PDF** | Wielostronicowa specyfikacja \u2014 system znajdzie sekcj\u0119 z etykiet\u0105 |
+| **PDF** | Specyfikacja lub eksport z Illustratora |
 | **DOCX** | Dokument Word (wymaga LibreOffice do konwersji) |
-
+""")
+        if is_structure_check:
+            st.markdown("""\
+**Wskaz\u00f3wki dla kontroli struktury:**
+- Eksportuj z Illustratora jako PDF z w\u0142\u0105czon\u0105 \
+kompatybilno\u015bci\u0105 PDF (domy\u015blnie w\u0142\u0105czona)
+- Im wy\u017csza rozdzielczo\u015b\u0107 eksportu, tym dok\u0142adniejsze wykrywanie
+- Upewnij si\u0119, \u017ce wszystkie sekcje j\u0119zykowe s\u0105 widoczne \
+na eksportowanym pliku
+- Dla plik\u00f3w .ai \u2014 u\u017cyj skryptu .jsx bezpo\u015brednio \
+w Illustratorze zamiast eksportu
+""")
+        elif is_linguistic_only:
+            st.markdown("""\
+**Wskaz\u00f3wki:**
+- Im lepsza jako\u015b\u0107 zdj\u0119cia, tym dok\u0142adniejsze wykrywanie b\u0142\u0119d\u00f3w
+- Upewnij si\u0119, \u017ce tekst na etykiecie jest czytelny
+""")
+        else:
+            st.markdown("""\
 **Wskaz\u00f3wki:**
 - Im lepsza jako\u015b\u0107 zdj\u0119cia, tym wy\u017csza pewno\u015b\u0107 odczytu
 - Upewnij si\u0119, \u017ce tabela analityczna jest czytelna
 - Wielostronicowe PDF \u2014 system analizuje pierwszy produkt
 """)
 
-    with st.expander("Co oznaczaj\u0105 sekcje raportu?"):
-        st.markdown("""\
+    # -- Sekcje raportu — mode-specific --
+    if is_structure_check:
+        with st.expander("Co oznaczaj\u0105 sekcje raportu?"):
+            st.markdown("""\
+**Status og\u00f3lny**
+- **OK** \u2014 brak problem\u00f3w, etykieta gotowa do druku
+- **Ostrze\u017cenia** \u2014 wykryto potencjalne problemy do sprawdzenia
+- **B\u0142\u0119dy** \u2014 wymagana korekta przed drukiem
+
+**Sekcje j\u0119zykowe**
+Dla ka\u017cdej sekcji (PL, DE, EN, FR, CZ...) system sprawdza:
+- Czy marker j\u0119zykowy jest widoczny (flaga, kod kraju, ikona)
+- Czy tre\u015b\u0107 sekcji jest obecna i kompletna
+- Jakie elementy etykiety zawiera (sk\u0142ad, sk\u0142adniki analityczne, \
+dawkowanie, przechowywanie, producent, opis, ostrze\u017cenia)
+- Jakich element\u00f3w brakuje w por\u00f3wnaniu z innymi sekcjami
+
+**Kompletno\u015b\u0107 diakrytyk\u00f3w**
+Sprawdzenie per j\u0119zyk, czy czcionka zawiera wymagane znaki:
+- PL: \u0105 \u0119 \u015b \u0107 \u017a \u017c \u0142 \u0144 \u00f3
+- DE: \u00e4 \u00f6 \u00fc \u00df
+- CZ: \u0159 \u0161 \u010d \u017e \u016f \u011b
+- HU, RO, FR, IT, ES \u2014 odpowiednie znaki narodowe
+
+**Problemy strukturalne** (kolorowe oznaczenia):
+- \U0001f534 **Krytyczny** \u2014 brak markera, brak ca\u0142ej sekcji
+- \U0001f7e1 **Ostrze\u017cenie** \u2014 osierocony tekst, luki, nak\u0142adanie si\u0119
+- \U0001f535 **Informacja** \u2014 niesp\u00f3jny porz\u0105dek, duplikat markera
+
+**Problemy z czcionk\u0105/glifami:**
+- \u274c **Brak glifa** \u2014 znak nie renderuje si\u0119 wcale
+- \U0001f500 **Podmieniony glif** \u2014 znak z innej czcionki zamiast w\u0142a\u015bciwego
+- \u2b1c **Puste miejsce** \u2014 luka gdzie powinien by\u0107 znak
+- \u25a1 **Kwadracik (tofu)** \u2014 boks zamiast znaku
+- \U0001f524 **Z\u0142y diakrytyk** \u2014 np. "a" zamiast "\u0105"
+- \u26a0\ufe0f **B\u0142\u0105d enkodowania** \u2014 np. "\u00c4\u0085" zamiast "\u0105"
+""")
+    elif is_linguistic_only:
+        with st.expander("Co oznaczaj\u0105 sekcje raportu?"):
+            st.markdown("""\
+**Jako\u015b\u0107 tekstu:**
+- \u2705 **Doskona\u0142a** \u2014 tekst bez b\u0142\u0119d\u00f3w
+- \U0001f535 **Dobra** \u2014 drobne uwagi
+- \U0001f7e1 **Do poprawy** \u2014 kilka b\u0142\u0119d\u00f3w wymagaj\u0105cych korekty
+- \U0001f534 **S\u0142aba** \u2014 liczne b\u0142\u0119dy, gruntowna korekta
+
+**Typy wykrywanych b\u0142\u0119d\u00f3w:**
+- \U0001f4dd **Ortografia** \u2014 liter\u00f3wki, b\u0142\u0119dne zapisy s\u0142\u00f3w
+- \U0001f4d6 **Gramatyka** \u2014 b\u0142\u0119dna odmiana, sk\u0142adnia, ko\u0144c\u00f3wki
+- \u270f\ufe0f **Interpunkcja** \u2014 brak/nadmiar przecink\u00f3w, kropek
+- \U0001f524 **Diakrytyki** \u2014 brakuj\u0105ce \u0105\u0119\u015b\u0107\u017a\u017c\u0142\u0144\u00f3 \
+(cz\u0119sty problem z czcionkami)
+- \U0001f500 **Terminologia** \u2014 mieszanie j\u0119zyk\u00f3w w jednym bloku \
+(np. "bia\u0142ko" obok "protein")
+
+Ka\u017cdy b\u0142\u0105d zawiera: oryginalny tekst, sugestowan\u0105 poprawk\u0119 \
+i kr\u00f3tkie wyja\u015bnienie.
+""")
+    else:
+        with st.expander("Co oznaczaj\u0105 sekcje raportu?"):
+            st.markdown("""\
 **\u2705 Status i wynik zgodno\u015bci**
 - **90\u2013100 pkt** \u2014 pe\u0142na zgodno\u015b\u0107, produkt gotowy
 - **70\u201389 pkt** \u2014 drobne uwagi, dopuszczalny z zaleceniami
@@ -315,8 +439,121 @@ Rozszerzona checklista: dawkowanie, przechowywanie, claimy vs sk\u0142ad, \
 oznaczenia recyklingu, kody kreskowe, nr zak\u0142adu, GMO i wi\u0119cej.
 """)
 
-    with st.expander("Kiedy konsultowa\u0107 z ekspertem?"):
-        st.markdown("""\
+    # -- Jak dzia\u0142a system — mode-specific --
+    with st.expander("Jak dzia\u0142a system?"):
+        if is_structure_check:
+            st.markdown("""\
+**Kontrola struktury i czcionki \u2014 1 wywo\u0142anie AI:**
+
+**1. Analiza sekcji j\u0119zykowych**
+System identyfikuje ka\u017cd\u0105 sekcj\u0119 j\u0119zykow\u0105 na etykiecie, \
+sprawdza obecno\u015b\u0107 marker\u00f3w (flagi, kody kraj\u00f3w) i por\u00f3wnuje \
+zawarto\u015b\u0107 mi\u0119dzy sekcjami \u2014 czy ka\u017cda ma te same elementy.
+
+**2. Weryfikacja czcionki**
+Dla ka\u017cdego wykrytego j\u0119zyka system sprawdza, czy u\u017cyta \
+czcionka zawiera pe\u0142en komplet znak\u00f3w diakrytycznych. \
+Wykrywa puste miejsca, kwadraciki (tofu), podmiany znak\u00f3w \
+i b\u0142\u0119dy enkodowania.
+
+**3. Lokalizacja problem\u00f3w**
+Ka\u017cdy wykryty problem jest oznaczany wsp\u00f3\u0142rz\u0119dnymi \
+na obrazie etykiety, co pozwala na:
+- Naniesienie oznacze\u0144 na kopi\u0119 PDF/obrazu
+- Wygenerowanie skryptu .jsx dla Illustratora
+
+**Kolory oznacze\u0144 w eksportach:**
+- \U0001f534 Czerwony \u2014 problemy krytyczne
+- \U0001f7e1 Pomara\u0144czowy \u2014 ostrze\u017cenia
+- \U0001f535 Niebieski \u2014 informacje
+- \U0001f7e3 Magenta (przerywany) \u2014 problemy z czcionk\u0105
+- \U0001f7e2 Zielony (przerywany) \u2014 sekcje j\u0119zykowe bez b\u0142\u0119d\u00f3w
+""")
+        elif is_linguistic_only:
+            st.markdown("""\
+**Weryfikacja j\u0119zykowa \u2014 1 wywo\u0142anie AI:**
+
+System automatycznie wykrywa j\u0119zyk(i) na etykiecie, \
+a nast\u0119pnie sprawdza ca\u0142y widoczny tekst pod k\u0105tem:
+
+1. **Ortografia** \u2014 liter\u00f3wki, b\u0142\u0119dne zapisy
+2. **Diakrytyki** \u2014 brakuj\u0105ce \u0105, \u0119, \u015b, \u0107, \u017a, \u017c, \u0142, \u0144, \u00f3 \
+(cz\u0119sty problem gdy czcionka nie ma polskich znak\u00f3w)
+3. **Gramatyka** \u2014 odmiana, sk\u0142adnia, ko\u0144c\u00f3wki
+4. **Interpunkcja** \u2014 przecinki, kropki, dwukropki
+5. **Terminologia** \u2014 sp\u00f3jno\u015b\u0107 nazewnictwa \
+(np. nie miesza\u0107 "bia\u0142ko" z "protein" w jednym bloku)
+
+System zwraca maksymalnie 10 najwa\u017cniejszych b\u0142\u0119d\u00f3w \
+z konkretnymi sugestiami poprawek.
+
+*Tryb szybki \u2014 bez analizy sk\u0142adu i zgodno\u015bci.*
+""")
+        else:
+            st.markdown("""\
+**Pe\u0142na weryfikacja \u2014 2 wywo\u0142ania AI + analiza Python:**
+
+**Wywo\u0142anie 1: Ekstrakcja danych**
+System odczytuje z etykiety: nazw\u0119 produktu, sk\u0142ad, \
+warto\u015bci od\u017cywcze (7 sk\u0142adnik\u00f3w), claimy, elementy opakowania, \
+j\u0119zyki. Nie ocenia zgodno\u015bci \u2014 tylko opisuje co widzi.
+
+**Python: Analiza deterministyczna**
+Wyekstrahowane dane weryfikowane s\u0105 regu\u0142ami zakodowanymi \
+w Pythonie (niezale\u017cnie od AI):
+- Progi FEDIAF 2021 (min/max sk\u0142adnik\u00f3w od\u017cywczych)
+- 6 wymaga\u0144 EU 767/2009
+- 30+ punkt\u00f3w kontrolnych opakowania
+- Sp\u00f3jno\u015b\u0107 claim\u00f3w ze sk\u0142adem
+
+**Wywo\u0142anie 2: Weryfikacja krzy\u017cowa + j\u0119zykowa**
+Niezale\u017cny, drugi odczyt warto\u015bci z tabeli analitycznej \
+(tolerancja rozbie\u017cno\u015bci: 0.5%) oraz sprawdzenie j\u0119zykowe.
+
+**Wynik:** compliance score 0\u2013100 obliczany na podstawie \
+twardych regu\u0142, nie interpretacji AI.
+""")
+
+    # -- Kiedy konsultowa\u0107 z ekspertem — mode-specific --
+    if is_structure_check:
+        with st.expander("Kiedy konsultowa\u0107 z grafikiem?"):
+            st.markdown("""\
+**Natychmiast przekazuj do korekty gdy:**
+- Status raportu: "B\u0142\u0119dy"
+- Brak markera j\u0119zykowego przy jakiejkolwiek sekcji
+- Wykryto osierocony tekst mi\u0119dzy sekcjami
+- Problemy z czcionk\u0105 (brakuj\u0105ce glify, kwadraciki)
+
+**Przed drukiem zweryfikuj gdy:**
+- Status: "Ostrze\u017cenia"
+- Niesp\u00f3jny porz\u0105dek element\u00f3w mi\u0119dzy sekcjami
+- Diakrytyki oznaczone jako "PROBLEM" dla kt\u00f3rego\u015b j\u0119zyka
+
+**Jak u\u017cy\u0107 skryptu .jsx:**
+1. Otw\u00f3rz oryginalny plik .ai w Illustratorze
+2. File > Scripts > Other Script...
+3. Wybierz pobrany plik .jsx
+4. System doda zablokowana warstw\u0119 "QC Annotations"
+5. Przejrzyj oznaczenia, popraw b\u0142\u0119dy
+6. Usu\u0144 lub ukryj warstw\u0119 QC przed eksportem
+""")
+    elif is_linguistic_only:
+        with st.expander("Kiedy konsultowa\u0107 z korektorem?"):
+            st.markdown("""\
+**Przekazuj do korekty gdy:**
+- Jako\u015b\u0107 tekstu: "S\u0142aba" lub "Do poprawy"
+- Wykryto b\u0142\u0119dy diakrytyk\u00f3w \u2014 cz\u0119sto oznacza problem z czcionk\u0105, \
+nie z tre\u015bci\u0105. Rozwa\u017c tryb "Kontrola struktury i czcionki"
+- Problemy terminologiczne \u2014 mieszanie j\u0119zyk\u00f3w w jednym bloku
+
+**Sugestie to propozycje, nie rozkazy:**
+System podaje najlepsz\u0105 sugestiowan\u0105 poprawk\u0119, ale korektor \
+powinien zweryfikowa\u0107 kontekst. Terminologia bran\u017cowa \
+(np. nazwy dodatk\u00f3w) mo\u017ce by\u0107 poprawna mimo zg\u0142oszenia.
+""")
+    else:
+        with st.expander("Kiedy konsultowa\u0107 z ekspertem?"):
+            st.markdown("""\
 System automatycznie oznacza raport jako **wymagaj\u0105cy przegl\u0105du** gdy:
 
 - \u26d4 Wynik < 60 punkt\u00f3w
@@ -332,8 +569,32 @@ System automatycznie oznacza raport jako **wymagaj\u0105cy przegl\u0105du** gdy:
 - Masz w\u0105tpliwo\u015bci co do jako\u015bci zdj\u0119cia/dokumentu
 """)
 
+    # -- S\u0142ownik — mode-specific --
     with st.expander("S\u0142ownik poj\u0119\u0107"):
-        st.markdown("""\
+        if is_structure_check:
+            st.markdown("""\
+| Poj\u0119cie | Znaczenie |
+|---------|-----------|
+| **Marker j\u0119zykowy** | Wizualne oznaczenie sekcji: flaga, kod kraju (PL/DE/EN), ikona |
+| **Sekcja j\u0119zykowa** | Blok tekstu etykiety w jednym j\u0119zyku, oddzielony markerem |
+| **Glif** | Wizualna reprezentacja znaku w czcionce |
+| **Tofu** | Kwadracik wy\u015bwietlany gdy czcionka nie ma danego znaku |
+| **Diakrytyk** | Znak modyfikuj\u0105cy liter\u0119: \u0105 \u0119 \u015b \u0107 \u017a \u017c \u0142 \u0144 \u00f3 \u00e4 \u00f6 \u00fc \u00df |
+| **Osierocony tekst** | Fragment tekstu mi\u0119dzy sekcjami, nieprzypisany do \u017cadnego j\u0119zyka |
+| **Bbox** | Prostok\u0105t otaczaj\u0105cy problem na etykiecie (bounding box) |
+| **JSX** | Skrypt ExtendScript dla Adobe Illustratora |
+| **QC Annotations** | Warstwa dodawana przez skrypt .jsx z oznaczeniami |
+""")
+        elif is_linguistic_only:
+            st.markdown("""\
+| Poj\u0119cie | Znaczenie |
+|---------|-----------|
+| **Diakrytyki** | Znaki \u0105 \u0119 \u015b \u0107 \u017a \u017c \u0142 \u0144 \u00f3 \u2014 cz\u0119sto gubione przez czcionki |
+| **Terminologia** | Sp\u00f3jno\u015b\u0107 u\u017cywanych termin\u00f3w w obr\u0119bie etykiety |
+| **Jako\u015b\u0107 tekstu** | Ocena og\u00f3lna: excellent / good / needs_review / poor |
+""")
+        else:
+            st.markdown("""\
 | Poj\u0119cie | Znaczenie |
 |---------|-----------|
 | **FEDIAF** | Europejska Federacja Przemys\u0142u Karm \u2014 wytyczne \u017cywieniowe |
@@ -349,33 +610,48 @@ System automatycznie oznacza raport jako **wymagaj\u0105cy przegl\u0105du** gdy:
 | **Art.19** | Obowi\u0105zek podania kontaktu do info o dodatkach |
 """)
 
-    with st.expander("Jak dzia\u0142a system?"):
-        st.markdown("""\
-**3 warstwy weryfikacji:**
-
-**1. Ekstrakcja danych**
-System odczytuje z etykiety: sk\u0142ad, warto\u015bci od\u017cywcze, \
-claimy, elementy widoczne na opakowaniu.
-
-**2. Analiza zgodno\u015bci**
-Wyekstrahowane dane s\u0105 weryfikowane wzgl\u0119dem:
-- Prog\u00f3w FEDIAF 2021 (min/max sk\u0142adnik\u00f3w od\u017cywczych)
-- Wymaga\u0144 EU 767/2009 (obowi\u0105zkowe elementy etykiety)
-- Checklisty opakowania (30 punkt\u00f3w kontrolnych)
-- Sp\u00f3jno\u015bci claim\u00f3w ze sk\u0142adem
-
-**3. Niezale\u017cna weryfikacja**
-Drugi, niezale\u017cny odczyt warto\u015bci liczbowych \
-+ sprawdzenie j\u0119zykowe etykiety.
-
-**Wynik:** powtarzalny compliance score obliczany \
-na podstawie twardych regu\u0142, nie interpretacji.
-
-*Narz\u0119dzie wspomagaj\u0105ce prac\u0119 dzia\u0142u jako\u015bci.*
-""")
-
+    # -- FAQ — shared + mode-specific --
     with st.expander("FAQ"):
-        st.markdown("""\
+        if is_structure_check:
+            st.markdown("""\
+**Ile trwa analiza?**
+15\u201330 sekund.
+
+**Czy system sprawdza sam plik .ai?**
+Nie bezpo\u015brednio. System analizuje obraz etykiety (PDF, JPG, PNG). \
+Dla natywnych plik\u00f3w .ai \u2014 u\u017cyj wygenerowanego skryptu .jsx, \
+kt\u00f3ry dzia\u0142a bezpo\u015brednio w Illustratorze.
+
+**Co je\u015bli etykieta jest jednoj\u0119zyczna?**
+System wykryje jedn\u0105 sekcj\u0119 j\u0119zykow\u0105 i sprawdzi \
+kompletno\u015b\u0107 czcionki dla tego j\u0119zyka. \
+Kontrola struktury jest istotna g\u0142\u00f3wnie dla etykiet wieloj\u0119zycznych.
+
+**Jak dok\u0142adne s\u0105 wsp\u00f3\u0142rz\u0119dne oznacze\u0144?**
+Przybli\u017cone \u2014 AI podaje szacunkowe pozycje. \
+Oznaczenia wskazuj\u0105 obszar problemu, nie precyzyjne piksele. \
+Zawsze zweryfikuj wizualnie w Illustratorze.
+
+**Czy skrypt .jsx modyfikuje m\u00f3j plik?**
+Dodaje now\u0105 zablokowana warstw\u0119 "QC Annotations". \
+Nie modyfikuje istniej\u0105cych warstw ani obiekt\u00f3w. \
+Mo\u017cesz j\u0105 usun\u0105\u0107 lub ukry\u0107 po przegl\u0105dzie.
+""")
+        elif is_linguistic_only:
+            st.markdown("""\
+**Ile trwa analiza?**
+10\u201320 sekund.
+
+**Ile b\u0142\u0119d\u00f3w system wykrywa?**
+System sprawdza ca\u0142y tekst i zwraca wszystkie znalezione b\u0142\u0119dy, \
+priorytetyzuj\u0105c te o najwi\u0119kszym wp\u0142ywie na jako\u015b\u0107.
+
+**Czy sprawdza wszystkie j\u0119zyki na etykiecie?**
+Tak. System automatycznie wykrywa j\u0119zyk(i) i sprawdza \
+ka\u017cdy fragment tekstu. Wykrywa te\u017c mieszanie j\u0119zyk\u00f3w.
+""")
+        else:
+            st.markdown("""\
 **Ile trwa analiza?**
 30\u201360 sekund bez trend\u00f3w, 60\u201390 z trendami rynkowymi.
 
@@ -390,7 +666,10 @@ z orygina\u0142em. Spr\u00f3buj lepszego zdj\u0119cia.
 **Jak dzia\u0142a cross-check?**
 Niezale\u017cny, drugi odczyt pobiera TYLKO liczby z tabeli analitycznej. \
 Je\u015bli r\u00f3\u017cni\u0105 si\u0119 od g\u0142\u00f3wnego odczytu > 0.5%, system flaguje.
+""")
 
+        # Shared FAQ items
+        st.markdown("""\
 **Czy dane s\u0105 przechowywane?**
 Nie. Analiza odbywa si\u0119 w pami\u0119ci. Po zamkni\u0119ciu przegl\u0105darki \
 dane znikaj\u0105. Raporty s\u0105 zapisywane tylko je\u015bli je pobierzesz.
@@ -488,7 +767,13 @@ if uploaded:
     with col_info:
         st.markdown(f"**Plik:** {uploaded.name}")
         st.markdown(f"**Rozmiar:** {uploaded.size / 1024:.1f} KB")
-        if is_linguistic_only:
+        if is_structure_check:
+            st.markdown("**Tryb:** kontrola struktury i czcionki")
+            st.caption(
+                "Analiza sekcji j\u0119zykowych i kompletno\u015bci "
+                "znak\u00f3w \u2014 ok. 15\u201330 sekund."
+            )
+        elif is_linguistic_only:
             st.markdown("**Tryb:** weryfikacja j\u0119zykowa")
             st.caption("Szybka analiza tekstu \u2014 ok. 10\u201320 sekund.")
         else:
@@ -578,12 +863,53 @@ def _run_linguistic_only(uploaded_file) -> None:
     st.session_state.report_market = None
 
 
+def _run_structure_check(uploaded_file) -> None:
+    with st.spinner(
+        "Sprawdzam struktur\u0119 sekcji j\u0119zykowych i czcionk\u0119... "
+        "(ok. 15\u201330 sekund)"
+    ):
+        try:
+            uploaded_file.seek(0)
+            raw_bytes = uploaded_file.read()
+            label_b64, media_type = file_to_base64(
+                raw_bytes, uploaded_file.name
+            )
+            result = verify_label_structure(
+                label_b64=label_b64,
+                media_type=media_type,
+                provider=secondary_provider,
+                settings=settings,
+            )
+        except ConversionError as e:
+            st.error(f"**B\u0142\u0105d pliku:** {e}")
+            return
+        except FediafVerifierError as e:
+            st.error(f"**B\u0142\u0105d API:** {e}")
+            return
+        except Exception as e:
+            st.error(f"**Nieoczekiwany b\u0142\u0105d:** {e}")
+            logger.exception("Unexpected error during structure check")
+            return
+
+    st.session_state.report = result
+    st.session_state.report_filename = uploaded_file.name
+    st.session_state.report_market = None
+    # Store raw bytes + media type for annotation generation
+    st.session_state.structure_file_bytes = raw_bytes
+    st.session_state.structure_media_type = media_type
+
+
+if uploaded and is_structure_check and st.button(
+    "Sprawd\u017a struktur\u0119", type="primary", use_container_width=True
+):
+    _run_structure_check(uploaded)
+
 if uploaded and is_linguistic_only and st.button(
     "Sprawd\u017a j\u0119zyk", type="primary", use_container_width=True
 ):
     _run_linguistic_only(uploaded)
 
-if uploaded and not is_linguistic_only and st.button(
+if uploaded and not is_linguistic_only and not is_structure_check and st.button(
     "Sprawd\u017a etykiet\u0119", type="primary", use_container_width=True
 ):
     _run_verification(uploaded, selected_market)
@@ -1147,10 +1473,269 @@ def _render_linguistic_report(
     )
 
 
+# -- Render structure check report -----------------------------------------------------
+def _render_structure_report(
+    result: LabelStructureCheckResult, filename: str,
+) -> None:
+    """Render label structure & font check results."""
+    st.divider()
+
+    if not result.performed or not result.report:
+        st.error(
+            f"**Kontrola struktury nie powiod\u0142a si\u0119.**\n\n"
+            f"{result.error or 'Nieznany b\u0142\u0105d.'}"
+        )
+        return
+
+    r = result.report
+
+    # Status banner
+    _STATUS_MAP = {
+        "ok": ("success", "\u2705 Struktura etykiety poprawna \u2014 "
+               "wszystkie sekcje j\u0119zykowe i czcionka w porz\u0105dku."),
+        "warnings": ("warning", "\u26a0\ufe0f Wykryto potencjalne problemy \u2014 "
+                     "przejrzyj uwagi poni\u017cej."),
+        "errors": ("error", "\u26d4 Wykryto b\u0142\u0119dy w strukturze lub czcionce \u2014 "
+                   "wymagana korekta przed drukiem."),
+    }
+    banner_type, banner_msg = _STATUS_MAP.get(
+        r.overall_status, ("info", r.overall_status)
+    )
+    getattr(st, banner_type)(banner_msg)
+
+    # Metrics
+    mc1, mc2, mc3 = st.columns(3)
+    mc1.metric("Sekcje j\u0119zykowe", str(r.section_count))
+    mc2.metric("Problemy strukturalne", str(len(r.structure_issues)))
+    mc3.metric("Problemy z czcionk\u0105", str(r.font_issues_count))
+
+    if r.summary:
+        st.caption(r.summary)
+
+    # -- Language sections overview --
+    if r.language_sections:
+        st.subheader("Sekcje j\u0119zykowe")
+        for sec in r.language_sections:
+            marker_icon = "\u2705" if sec.marker_present else "\u274c"
+            content_icon = "\u2705" if sec.content_present else "\u274c"
+            complete_icon = "\u2705" if sec.content_complete else "\u26a0\ufe0f"
+
+            with st.expander(
+                f"{marker_icon} [{sec.language_code.upper()}] "
+                f"{sec.language_name}",
+                expanded=not sec.content_complete or not sec.marker_present,
+            ):
+                c1, c2, c3 = st.columns(3)
+                c1.markdown(f"**Marker:** {marker_icon} "
+                           f"{sec.marker_type}: \"{sec.marker_text}\""
+                           if sec.marker_present
+                           else f"**Marker:** {marker_icon} BRAK")
+                c2.markdown(f"**Tre\u015b\u0107:** {content_icon}")
+                c3.markdown(f"**Kompletna:** {complete_icon}")
+
+                if sec.section_elements:
+                    st.markdown(
+                        "**Obecne elementy:** "
+                        + ", ".join(sec.section_elements)
+                    )
+                if sec.missing_elements:
+                    st.warning(
+                        "**Brakuj\u0105ce elementy:** "
+                        + ", ".join(sec.missing_elements)
+                    )
+                if sec.notes:
+                    st.caption(sec.notes)
+
+    # -- Diacritics check per language --
+    if r.diacritics_check:
+        st.subheader("Kompletno\u015b\u0107 diakrytyk\u00f3w")
+        _LANG_DIACRITICS = {
+            "pl": "\u0105\u0119\u015b\u0107\u017a\u017c\u0142\u0144\u00f3",
+            "de": "\u00e4\u00f6\u00fc\u00df",
+            "cs": "\u0159\u0161\u010d\u017e\u016f\u011b",
+            "hu": "\u00e1\u00e9\u00ed\u00f3\u00f6\u0151\u00fa\u00fc\u0171",
+            "ro": "\u0103\u00e2\u00ee\u0219\u021b",
+            "fr": "\u00e9\u00e8\u00ea\u00e7\u00e0\u00f4",
+            "it": "\u00e0\u00e8\u00e9\u00ec\u00f2\u00f9",
+            "es": "\u00f1\u00e1\u00e9\u00ed\u00f3\u00fa\u00fc",
+        }
+        cols = st.columns(min(len(r.diacritics_check), 4))
+        for idx, (lang, ok) in enumerate(r.diacritics_check.items()):
+            col = cols[idx % len(cols)]
+            icon = "\u2705" if ok else "\u274c"
+            chars = _LANG_DIACRITICS.get(lang, "")
+            col.markdown(
+                f"{icon} **{lang.upper()}**"
+                + (f"  \n{chars}" if chars else "")
+            )
+
+    # -- Structure issues --
+    if r.structure_issues:
+        st.subheader(
+            f"Problemy strukturalne ({len(r.structure_issues)})"
+        )
+        _SEV_ICONS = {
+            "critical": "\U0001f534",
+            "warning": "\U0001f7e1",
+            "info": "\U0001f535",
+        }
+        _SEV_LABELS = {
+            "critical": "Krytyczny",
+            "warning": "Ostrze\u017cenie",
+            "info": "Informacja",
+        }
+        _TYPE_LABELS = {
+            "missing_marker": "Brak markera",
+            "orphaned_text": "Osierocony tekst",
+            "section_overlap": "Nak\u0142adanie si\u0119 sekcji",
+            "section_gap": "Luka mi\u0119dzy sekcjami",
+            "marker_damaged": "Uszkodzony marker",
+            "inconsistent_order": "Niesp\u00f3jny porz\u0105dek",
+            "missing_section": "Brak sekcji",
+            "duplicate_marker": "Duplikat markera",
+        }
+        from html import escape as _esc
+
+        for si in r.structure_issues:
+            sev_icon = _SEV_ICONS.get(si.severity, "\u26aa")
+            sev_label = _SEV_LABELS.get(si.severity, si.severity)
+            type_label = _TYPE_LABELS.get(si.issue_type, si.issue_type)
+            langs = ", ".join(
+                c.upper() for c in si.affected_languages
+            ) if si.affected_languages else "\u2014"
+
+            st.markdown(
+                f"{sev_icon} **[{sev_label}] {type_label}** \u2014 "
+                f"{_esc(si.description)}  \n"
+                f'<span style="opacity:0.6;font-size:0.85rem;">'
+                f"J\u0119zyki: {_esc(langs)}"
+                f"{f' | Lokalizacja: {_esc(si.location)}' if si.location else ''}"
+                f"</span>",
+                unsafe_allow_html=True,
+            )
+
+    # -- Glyph/font issues --
+    if r.glyph_issues:
+        st.subheader(
+            f"Problemy z czcionk\u0105 / glifami ({len(r.glyph_issues)})"
+        )
+        _GLYPH_ICONS = {
+            "missing_glyph": "\u274c",
+            "substituted_glyph": "\U0001f500",
+            "blank_space": "\u2b1c",
+            "tofu_box": "\u25a1",
+            "wrong_diacritic": "\U0001f524",
+            "encoding_error": "\u26a0\ufe0f",
+        }
+        _GLYPH_LABELS = {
+            "missing_glyph": "Brak glifa",
+            "substituted_glyph": "Podmieniony glif",
+            "blank_space": "Puste miejsce",
+            "tofu_box": "Kwadracik (tofu)",
+            "wrong_diacritic": "Z\u0142y diakrytyk",
+            "encoding_error": "B\u0142\u0105d enkodowania",
+        }
+        for gi in r.glyph_issues:
+            g_icon = _GLYPH_ICONS.get(gi.issue_type, "\u2022")
+            g_label = _GLYPH_LABELS.get(gi.issue_type, gi.issue_type)
+            chars_str = (
+                " \u2014 brakuje: " + " ".join(gi.missing_characters)
+                if gi.missing_characters else ""
+            )
+            from html import escape as _esc
+
+            # Use HTML for affected/expected text to avoid markdown escaping
+            st.markdown(
+                f"{g_icon} **[{gi.language_code.upper()}] [{g_label}]** "
+                f'<s>{_esc(gi.affected_text)}</s> \u2192 '
+                f"<strong>{_esc(gi.expected_text)}</strong>"
+                f"{chars_str}  \n"
+                f'<span style="opacity:0.6;font-size:0.85rem;">'
+                f"{_esc(gi.explanation)}"
+                f"{f' | {_esc(gi.location)}' if gi.location else ''}"
+                f"</span>",
+                unsafe_allow_html=True,
+            )
+
+    if not r.structure_issues and not r.glyph_issues:
+        st.success(
+            "Nie wykryto problem\u00f3w strukturalnych ani z czcionk\u0105 "
+            "\u2014 etykieta gotowa do druku."
+        )
+
+    # Export section
+    st.divider()
+    st.subheader("Pobierz wyniki")
+    stem = Path(filename).stem
+
+    # Row 1: TXT report + JSX script
+    col_txt, col_jsx = st.columns(2)
+    with col_txt:
+        txt = structure_to_text(result, filename)
+        st.download_button(
+            "\u2b07\ufe0f Raport (TXT)",
+            data=txt,
+            file_name=f"struktura_{stem}.txt",
+            mime="text/plain",
+            use_container_width=True,
+        )
+
+    with col_jsx:
+        from fediaf_verifier.jsx_generator import generate_jsx
+
+        jsx_script = generate_jsx(result.report, filename)
+        st.download_button(
+            "\u2b07\ufe0f Skrypt Illustrator (.jsx)",
+            data=jsx_script,
+            file_name=f"qc_{stem}.jsx",
+            mime="application/javascript",
+            use_container_width=True,
+            help=(
+                "Otw\u00f3rz etykiet\u0119 w Illustratorze, "
+                "potem File > Scripts > Other Script > wybierz ten plik. "
+                "Doda warstw\u0119 'QC Annotations' z oznaczeniami."
+            ),
+        )
+
+    # Row 2: Annotated PDF/image (if source file available)
+    file_bytes = st.session_state.get("structure_file_bytes")
+    media_type = st.session_state.get("structure_media_type", "")
+
+    if file_bytes and result.report:
+        from fediaf_verifier.annotator import annotate_file
+
+        annotated_bytes, out_mime = annotate_file(
+            file_bytes, media_type, result.report,
+        )
+        if annotated_bytes:
+            ext = "pdf" if "pdf" in out_mime else "png"
+            st.download_button(
+                f"\u2b07\ufe0f Etykieta z oznaczeniami (.{ext})",
+                data=annotated_bytes,
+                file_name=f"annotated_{stem}.{ext}",
+                mime=out_mime,
+                use_container_width=True,
+                help=(
+                    "Kopia etykiety z naniesionymi prostok\u0105tami "
+                    "oznaczaj\u0105cymi wykryte problemy."
+                ),
+            )
+        elif media_type not in ("application/pdf", "image/jpeg", "image/png"):
+            st.caption(
+                "Adnotacje wizualne dost\u0119pne tylko dla PDF i obraz\u00f3w. "
+                "Dla plik\u00f3w .ai u\u017cyj skryptu JSX powy\u017cej."
+            )
+
+
 # -- Render saved report ---------------------------------------------------------------
 if st.session_state.report is not None:
     report = st.session_state.report
-    if isinstance(report, LinguisticCheckResult):
+    if isinstance(report, LabelStructureCheckResult):
+        _render_structure_report(
+            report,
+            st.session_state.report_filename,
+        )
+    elif isinstance(report, LinguisticCheckResult):
         _render_linguistic_report(
             report,
             st.session_state.report_filename,
