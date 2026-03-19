@@ -326,3 +326,356 @@ competitive_benchmarks (lista: [{{aspect, current_level, industry_standard, \
 suggestion}}]),
 trend_alignment (lista stringow),
 actionable_summary (podsumowanie dla R&D — konkretne akcje)."""
+
+
+# -- Per-market compliance check prompt -------------------------------------------------
+
+
+def build_market_check_prompt(market_code: str, market_name: str) -> str:
+    """Build prompt for per-market regulatory compliance check.
+
+    Loads rules from market_rules.py and asks AI to verify the label
+    against base EU 767/2009 plus country-specific requirements.
+
+    Args:
+        market_code: ISO 3166-1 alpha-2 code (e.g. "DE", "FR").
+        market_name: Full market name (e.g. "Niemcy", "Francja").
+    """
+    from fediaf_verifier.market_rules import MARKET_RULES
+
+    rules = MARKET_RULES.get(market_code, {})
+    regulations = rules.get("regulations", [])
+    language_required = rules.get("language_required", "")
+
+    # Format regulations list for prompt
+    rules_text = ""
+    for reg in regulations:
+        rules_text += (
+            f"- [{reg['id']}] ({reg['category']}): {reg['desc']}\n"
+        )
+
+    if not rules_text:
+        rules_text = (
+            "  Brak szczegolowych regul — sprawdz ogolne wymagania EU.\n"
+        )
+
+    return f"""\
+Przeanalizuj etykiete karmy dla zwierzat domowych pod katem \
+ZGODNOSCI REGULACYJNEJ na rynku: {market_name} ({market_code}).
+
+ZADANIE 1 — BAZOWA ZGODNOSC EU 767/2009:
+Sprawdz czy etykieta spelnia podstawowe wymagania Rozporzadzenia (WE) nr 767/2009:
+- Lista skladnikow w kolejnosci malejacej
+- Skladniki analityczne (surowe bialko, tluszcz, wlokno, popioly)
+- Dane producenta / osoby odpowiedzialnej
+- Masa netto / ilosc
+- Gatunek zwierzecia docelowego
+- Instrukcja dawkowania
+- Numer partii lub data produkcji
+- Termin przydatnosci
+
+ZADANIE 2 — WYMAGANIA SPECYFICZNE DLA RYNKU {market_code}:
+Jezyk wymagany: {language_required}
+
+Sprawdz ponizsze wymagania specyficzne dla {market_name}:
+{rules_text}
+Dla KAZDEGO wymagania podaj:
+- Czy etykieta jest zgodna (compliant: true/false)
+- Co znaleziono na etykiecie (finding)
+- Rekomendacje naprawcze (recommendation)
+- Waznosc problemu (severity: critical/warning/info)
+
+ZADANIE 3 — JEZYK:
+Sprawdz czy tresc etykiety jest dostepna w wymaganym jezyku ({language_required}):
+- Czy pelna tresc jest przetlumaczona
+- Czy terminologia regulacyjna jest poprawna w danym jezyku
+- Czy znaki diakrytyczne specyficzne dla tego jezyka sa poprawne
+- Czy nie brakuje kluczowych sekcji w wymaganym jezyku
+
+ZADANIE 4 — CERTYFIKATY:
+Jesli na etykiecie widoczne sa claimy (bio, eco, organic, natural, grain-free, itp.) \
+sprawdz czy wymagane certyfikaty sa obecne dla rynku {market_code}.
+
+Odpowiedz WYLACZNIE poprawnym JSON (bez markdown). Pola:
+target_market ("{market_name}"),
+target_market_code ("{market_code}"),
+base_eu_compliant (bool),
+market_specific_requirements (lista: [{{requirement_id, category, description, \
+regulation_reference, compliant (bool), finding, recommendation, \
+severity ("critical"/"warning"/"info")}}]),
+language_requirements_met (bool),
+language_notes (string),
+additional_certifications_recommended (lista stringow),
+overall_compliance ("compliant"/"issues_found"/"non_compliant"),
+score (0-100),
+summary (krotkie podsumowanie po polsku)."""
+
+
+# -- EAN/barcode extraction prompt -----------------------------------------------------
+
+EAN_EXTRACTION_PROMPT = """\
+Odczytaj WSZYSTKIE kody kreskowe i kody QR widoczne na etykiecie.
+
+Dla KAZDEGO kodu kreskowego podaj:
+- barcode_number: cyfry odczytane z kodu (dokladnie, cyfra po cyfrze)
+- barcode_type: "EAN-13" (13 cyfr), "EAN-8" (8 cyfr), "UPC-A" (12 cyfr), \
+lub "unknown" jesli nie mozesz okreslic
+- barcode_readable: true jesli mozesz odczytac cyfry, false jesli nieczytelny
+
+Dla KAZDEGO kodu QR podaj:
+- present: true
+- readable: true jesli mozesz odczytac zawartosc
+- content: tekst/URL zawarty w QR (jesli czytelny)
+- notes: uwagi
+
+Jesli na etykiecie NIE MA kodow kreskowych ani QR — zwroc puste listy.
+
+Odpowiedz WYLACZNIE poprawnym JSON (bez markdown). Pola:
+barcodes (lista: [{{barcode_number, barcode_type, barcode_readable}}]),
+qr_codes (lista: [{{present, readable, content, notes}}]),
+summary (krotkie podsumowanie)."""
+
+
+# -- Claims vs Composition check prompt ----------------------------------------
+
+CLAIMS_CHECK_PROMPT = """\
+Przeanalizuj etykiete karmy dla zwierzat domowych pod katem \
+SPOJNOSCI CLAIMOW MARKETINGOWYCH Z RZECZYWISTYM SKLADEM.
+
+ZADANIE 1 — EKSTRAKCJA:
+- Wyekstrahuj WSZYSTKIE claimy/deklaracje marketingowe z etykiety \
+(np. "bez zboz", "70% miesa", "bogaty w kurczaka", "wspiera stawy", \
+"grain free", "hypoallergenic", "sensitive", itp.)
+- Wyekstrahuj liste skladnikow WRAZ Z PROCENTAMI (jesli podane)
+- Wyekstrahuj nazwe produktu (do weryfikacji reguly % w nazwie)
+- Wyekstrahuj istotne wartosci odzywcze ze skladnikow analitycznych
+
+ZADANIE 2 — WERYFIKACJA KAZDEGO CLAIMU:
+Dla kazdego znalezionego claimu sprawdz czy jest SPOJNY ze skladem:
+- Claimy procentowe: czy podany % sklada sie z rzeczywistego skladu?
+- Claimy "bez X": czy skladnik X faktycznie NIE wystepuje w skladzie?
+- Claimy o wyroznionym skladniku: czy skladnik jest obecny i w odpowiedniej ilosci?
+- Claimy odzywcze: czy wartosci analityczne potwierdzaja claim?
+
+ZADANIE 3 — REGULA PROCENTOWA W NAZWIE (EU 767/2009):
+Sprawdz nazwe produktu pod katem regul nazewnictwa:
+- "z X" (np. "z kurczakiem") = min 4% skladnika X
+- "bogaty w X" / "bogata w X" = min 14% skladnika X
+- X jako glowna nazwa (np. "Kurczak dla psa") = min 26% skladnika X
+Jesli regula nie ma zastosowania — naming_rule_check = null.
+
+ZADANIE 4 — CLAIM "BEZ ZBOZ" / "GRAIN FREE":
+Jesli etykieta deklaruje "bez zboz" / "grain free" / "bezzbozowa":
+- Sprawdz liste skladnikow pod katem: pszenica, jeczmien, owies, zyto, \
+kukurydza, ryz, proso, sorgo, orkisz, wheat, barley, oat, rye, corn, \
+maize, rice, millet, sorghum, spelt, cereals, grains
+- Jesli brak claimu — grain_free_check_passed = null
+
+ZADANIE 5 — CLAIMY TERAPEUTYCZNE (ZABRONIONE):
+Wykryj claimy sugerujace dzialanie lecznicze lub terapeutyczne \
+(zabronione per EU 767/2009 Art.13):
+- "leczy", "zapobiega", "likwiduje", "eliminuje choroby"
+- "zastepuje leczenie weterynaryjne"
+- "terapeutyczny", "leczniczy", "medyczny"
+UWAGA: dopuszczalne sa claimy funkcjonalne (np. "wspiera trawienie", \
+"zdrowa siersc") — to NIE SA claimy terapeutyczne.
+
+Odpowiedz WYLACZNIE poprawnym JSON (bez markdown). Badz ZWIEZLY. Pola:
+claims_found (lista stringow — wszystkie znalezione claimy),
+ingredients_with_percentages (lista stringow np. ["kurczak 30%", "ryz 15%"]),
+claim_validations (lista: [{{claim_text, claim_category \
+("percentage"/"grain_free"/"ingredient_highlight"/"nutritional"/\
+"naming_rule"/"therapeutic"/"other"), \
+is_consistent (bool), inconsistency_description, \
+relevant_ingredients (lista), severity ("critical"/"warning"/"info"), \
+recommendation}}]),
+naming_rule_check ({{product_name, trigger_word, required_minimum_percent, \
+ingredient_name, actual_percent (float lub null), compliant (bool), notes}} \
+lub null jesli regula nie ma zastosowania),
+grain_free_check_passed (bool lub null),
+grain_ingredients_found (lista stringow),
+therapeutic_claims_found (lista stringow),
+overall_consistency ("consistent"/"inconsistencies_found"/"critical_issues"),
+score (0-100, gdzie 100 = pelna spojnosc),
+summary (krotkie podsumowanie po polsku)."""
+
+
+# -- Label text generation prompt ------------------------------------------------
+
+
+def build_label_text_prompt(
+    species: str,
+    lifestage: str,
+    food_type: str,
+    ingredients: str,
+    nutrients: dict,
+    target_language: str,
+    target_language_name: str,
+    product_name: str = "",
+) -> str:
+    """Build prompt for generating complete label text in the target language.
+
+    Args:
+        species: Target species (e.g. "dog", "cat").
+        lifestage: Lifestage (e.g. "adult", "puppy").
+        food_type: Food type (e.g. "dry", "wet").
+        ingredients: Ingredients list as provided by the user.
+        nutrients: Dict of analytical constituents (e.g. {"crude_protein": 26}).
+        target_language: ISO 639-1 code (e.g. "en", "de", "pl").
+        target_language_name: Full language name (e.g. "English", "Deutsch").
+        product_name: Optional product name.
+
+    Returns:
+        Complete prompt string for label text generation.
+    """
+    # Format nutrients into readable text
+    nutrient_lines = []
+    nutrient_labels = {
+        "crude_protein": "Crude protein / Bialko surowe",
+        "crude_fat": "Crude fat / Tluszcz surowy",
+        "crude_fibre": "Crude fibre / Wlokno surowe",
+        "moisture": "Moisture / Wilgotnosc",
+        "crude_ash": "Crude ash / Popiol surowy",
+        "calcium": "Calcium / Wapn",
+        "phosphorus": "Phosphorus / Fosfor",
+    }
+    for key, label in nutrient_labels.items():
+        val = nutrients.get(key)
+        if val is not None:
+            nutrient_lines.append(f"  {label}: {val}%")
+    nutrients_text = "\n".join(nutrient_lines) if nutrient_lines else "  (brak danych)"
+
+    product_block = ""
+    if product_name:
+        product_block = f"\nNAZWA PRODUKTU: {product_name}\n"
+
+    return f"""\
+Wygeneruj KOMPLETNY tekst etykiety karmy dla zwierzat domowych \
+w jezyku: {target_language_name} ({target_language}).
+
+Uzyj oficjalnej terminologii regulacyjnej EU 767/2009 w jezyku docelowym.
+{product_block}
+DANE WEJSCIOWE:
+Gatunek: {species}
+Etap zycia: {lifestage}
+Typ karmy: {food_type}
+
+SKLADNIKI (lista w kolejnosci malejacej udzialu):
+{ingredients}
+
+SKLADNIKI ANALITYCZNE:
+{nutrients_text}
+
+WYMAGANE SEKCJE (wygeneruj KAZDA):
+
+1. COMPOSITION / SKLAD:
+   - Lista skladnikow w formacie regulacyjnym EU 767/2009
+   - Skladniki w kolejnosci malejacej udzialu wagowego
+   - Uzyj poprawnej terminologii w jezyku docelowym
+   - Zachowaj procenty jesli podane w danych wejsciowych
+
+2. ANALYTICAL CONSTITUENTS / SKLADNIKI ANALITYCZNE:
+   - Tabela wartosci analitycznych w formacie regulacyjnym
+   - Uzyj nazw regulacyjnych: "Crude protein" (EN), "Rohprotein" (DE), \
+"Proteine brute" (FR), "Bialko surowe" (PL)
+
+3. FEEDING GUIDELINES / DAWKOWANIE:
+   - Tabela dawkowania na podstawie masy ciala zwierzecia
+   - Dla psow: zakresy wagowe 2-5 kg, 5-10 kg, 10-20 kg, 20-30 kg, 30-40 kg, 40+ kg
+   - Dla kotow: zakresy wagowe 2-4 kg, 4-6 kg, 6-8 kg, 8+ kg
+   - Oblicz dawki na podstawie typu karmy i wartosci odzywczych
+   - Dodaj uwage: "Dawki orientacyjne, dostosuj do aktywnosci i kondycji zwierzecia"
+
+4. STORAGE INSTRUCTIONS / PRZECHOWYWANIE:
+   - Standardowe instrukcje przechowywania dla danego typu karmy
+   - Sucha: "Przechowywac w suchym, chlodnym miejscu"
+   - Mokra: "Po otwarciu przechowywac w lodowce i zuzyc w ciagu 48h"
+
+5. MANUFACTURER / PRODUCENT:
+   - Wstaw placeholder: "[NAZWA PRODUCENTA]"
+   - "[ADRES PRODUCENTA]"
+   - "[NUMER REJESTRACYJNY ZAKLADU]"
+
+6. WARNINGS / OSTRZEZENIA:
+   - Dodaj ostrzezenia odpowiednie dla typu produktu:
+   - Zawsze: "Zapewnic staly dostep do swiezej wody pitnej"
+   - Mokra karma: "Po otwarciu przechowywac w lodowce"
+   - Surowa karma (raw/BARF): ostrzezenia o higieny, mrozonej masy, \
+mycia rak po kontakcie
+   - Karma z owadami: informacja o mozliwosci reakcji alergicznej \
+u zwierzat uczulonych na skorupiaki
+
+Dla kazdej sekcji podaj:
+- section_name: klucz wewnetrzny (np. "composition", "analytical_constituents")
+- section_title: tytul sekcji w jezyku docelowym
+- content: pelna tresc sekcji
+- regulatory_reference: odniesienie do regulacji EU (np. "EU 767/2009 Art.17")
+- notes: dodatkowe uwagi
+
+DODATKOWO:
+- feeding_table: lista wierszy tabeli dawkowania \
+[{{weight_range, daily_amount}}]
+- warnings: lista ostrzezen jako stringi
+- complete_text: CALY tekst etykiety jako jeden string \
+(wszystkie sekcje polaczone w czytelny format)
+- summary: krotkie podsumowanie wygenerowanego tekstu
+
+Odpowiedz WYLACZNIE poprawnym JSON (bez markdown). Pola:
+product_name, species, lifestage, food_type, \
+language ("{target_language}"), language_name ("{target_language_name}"),
+sections (lista: [{{section_name, section_title, content, \
+regulatory_reference, notes}}]),
+feeding_table (lista: [{{weight_range, daily_amount}}]),
+warnings (lista stringow),
+complete_text (caly tekst etykiety jako jeden string),
+summary (krotkie podsumowanie)."""
+
+
+# -- Label version comparison (diff) prompt ------------------------------------
+
+LABEL_DIFF_PROMPT = """\
+Porownaj DWA obrazy etykiety tego samego produktu.
+PIERWSZY obraz = STARA WERSJA. DRUGI obraz = NOWA WERSJA.
+
+ZADANIE 1 — ZMIANY TRESCI:
+Zidentyfikuj WSZYSTKIE roznice w tekscie miedzy wersjami:
+- Zmiany w skladzie (dodane/usuniete skladniki, zmienione %)
+- Zmiany w skladnikach analitycznych (wartosci)
+- Zmiany w dawkowaniu
+- Zmiany w danych producenta
+- Zmiany w claimach
+- Zmiany w ostrzezeniach
+- Zmiany jezykowe (poprawki, nowe tlumaczenia)
+Dla kazdej zmiany podaj: sekcja, typ (added/removed/modified/moved), \
+stary tekst, nowy tekst, waga (critical/warning/info), wplyw regulacyjny.
+
+ZADANIE 2 — ZMIANY UKLADU:
+Zidentyfikuj zmiany w layoucie/designie:
+- Zmieniona pozycja elementow
+- Zmienione kolory, fonty, rozmiary
+- Dodane/usuniete elementy graficzne
+- Zmienione proporcje sekcji
+
+ZADANIE 3 — NOWE PROBLEMY:
+Czy zmiany WPROWADZILY nowe problemy regulacyjne? \
+(np. usuniety wymagany element, bledna wartosc)
+
+ZADANIE 4 — NAPRAWIONE PROBLEMY:
+Czy zmiany NAPRAWILY problemy ktore istnialy w starej wersji?
+
+ZADANIE 5 — OCENA RYZYKA:
+Okresil poziom ryzyka zmian: low (kosmetyczne), medium (istotne ale bezpieczne), \
+high (wymagaja weryfikacji regulacyjnej przed drukiem).
+
+Odpowiedz WYLACZNIE poprawnym JSON (bez markdown). Pola:
+old_label_summary (krotki opis starej wersji),
+new_label_summary (krotki opis nowej wersji),
+text_changes (lista: [{{section, change_type ("added"/"removed"/"modified"/"moved"), \
+old_text, new_text, severity ("critical"/"warning"/"info"), regulatory_impact}}]),
+layout_changes (lista: [{{description, area, severity}}]),
+new_issues_introduced (lista: [{{description, severity, introduced_by_change}}]),
+issues_resolved (lista stringow),
+overall_assessment (1-2 zdania),
+change_count (int),
+risk_level ("low"/"medium"/"high"),
+summary (krotkie podsumowanie po polsku)."""

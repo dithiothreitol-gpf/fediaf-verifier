@@ -1,42 +1,36 @@
 """Linguistic verification models."""
 
-from enum import StrEnum
+from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import Field
 
-
-class LinguisticIssueType(StrEnum):
-    SPELLING = "spelling"
-    GRAMMAR = "grammar"
-    PUNCTUATION = "punctuation"
-    DIACRITICS = "diacritics"
-    TERMINOLOGY = "terminology"
+from .base import NullSafeBase
 
 
-class LinguisticIssue(BaseModel):
+class LinguisticIssue(NullSafeBase):
     """A single linguistic issue found on the label."""
 
-    issue_type: LinguisticIssueType
-    original: str
-    suggestion: str
-    context: str
-    explanation: str
+    issue_type: str = Field(
+        default="spelling",
+        description="spelling/grammar/punctuation/diacritics/terminology",
+    )
+    original: str = ""
+    suggestion: str = ""
+    context: str = ""
+    explanation: str = ""
 
 
-class LinguisticReport(BaseModel):
-    """AI output for linguistic verification.
+class LinguisticReport(NullSafeBase):
+    """AI output for linguistic verification."""
 
-    Used with: client.messages.parse(output_format=LinguisticReport)
-    """
-
-    detected_language: str
-    detected_language_name: str
-    issues: list[LinguisticIssue] = []
-    overall_quality: str  # "excellent" / "good" / "needs_review" / "poor"
-    summary: str
+    detected_language: str = ""
+    detected_language_name: str = ""
+    issues: list[LinguisticIssue] = Field(default_factory=list)
+    overall_quality: str = ""  # "excellent" / "good" / "needs_review" / "poor"
+    summary: str = ""
 
 
-class LinguisticCheckResult(BaseModel):
+class LinguisticCheckResult(NullSafeBase):
     """Internal pipeline result wrapping LinguisticReport + error handling."""
 
     performed: bool = False

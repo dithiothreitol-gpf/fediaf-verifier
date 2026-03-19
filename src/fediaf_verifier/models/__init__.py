@@ -1,5 +1,11 @@
 """Pydantic v2 models for FEDIAF verifier."""
 
+from .claims_check import (
+    ClaimValidation,
+    ClaimsCheckReport,
+    ClaimsCheckResult,
+    NamingRuleCheck,
+)
 from .cross_check import CrossCheckResult, Discrepancy
 from .design_analysis import (
     CompetitiveBenchmark,
@@ -8,9 +14,23 @@ from .design_analysis import (
     DesignCategoryScore,
     DesignIssue,
 )
+from .ean_check import EANCheckReport, EANCheckResult, EANResult, QRCodeResult
 from .eu_labelling import EULabellingCheck
+from .label_diff import (
+    DiffChange,
+    DiffLayoutChange,
+    LabelDiffReport,
+    LabelDiffResult,
+    NewIssue,
+)
 from .extraction import LabelExtraction, SecondaryCheck
 from .issues import Issue, Severity
+from .label_text import (
+    FeedingGuideline,
+    LabelTextReport,
+    LabelTextResult,
+    LabelTextSection,
+)
 from .label_structure import (
     GlyphIssue,
     LabelStructureCheckResult,
@@ -21,9 +41,9 @@ from .label_structure import (
 from .linguistic import (
     LinguisticCheckResult,
     LinguisticIssue,
-    LinguisticIssueType,
     LinguisticReport,
 )
+from .market_check import MarketCheckReport, MarketCheckResult, MarketRequirement
 from .market_trends import MarketTrends, Positioning
 from .translation import TranslatedSection, TranslationReport, TranslationResult
 from .nutrients import NUTRIENT_FIELDS, NutrientsOnly, NutrientValues
@@ -38,6 +58,9 @@ from .report import (
 
 __all__ = [
     "NUTRIENT_FIELDS",
+    "ClaimValidation",
+    "ClaimsCheckReport",
+    "ClaimsCheckResult",
     "CompetitiveBenchmark",
     "ComplianceStatus",
     "CrossCheckResult",
@@ -45,29 +68,45 @@ __all__ = [
     "DesignAnalysisResult",
     "DesignCategoryScore",
     "DesignIssue",
+    "DiffChange",
+    "DiffLayoutChange",
     "Discrepancy",
+    "EANCheckReport",
+    "EANCheckResult",
+    "EANResult",
     "EULabellingCheck",
+    "NewIssue",
     "EnrichedReport",
     "ExtractionConfidence",
+    "FeedingGuideline",
     "FoodType",
     "GlyphIssue",
     "Issue",
+    "LabelDiffReport",
+    "LabelDiffResult",
     "LabelExtraction",
     "LabelStructureCheckResult",
+    "LabelTextReport",
+    "LabelTextResult",
+    "LabelTextSection",
     "LabelStructureReport",
     "LanguageSectionInfo",
     "Lifestage",
     "LinguisticCheckResult",
     "LinguisticIssue",
-    "LinguisticIssueType",
     "LinguisticReport",
+    "MarketCheckReport",
+    "MarketCheckResult",
+    "MarketRequirement",
     "MarketTrends",
+    "NamingRuleCheck",
     "NutrientValues",
     "NutrientsOnly",
     "PackagingCheck",
     "Positioning",
     "Product",
     "ProductClassification",
+    "QRCodeResult",
     "SecondaryCheck",
     "Severity",
     "Species",

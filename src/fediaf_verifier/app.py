@@ -13,26 +13,18 @@ from fediaf_verifier.exceptions import (
     ConversionError,
     FediafVerifierError,
 )
-from fediaf_verifier.export import (
-    design_to_text,
-    structure_to_text,
-    to_json,
-    to_text,
-    translation_to_text,
-)
-from fediaf_verifier.models import (
-    EnrichedReport,
-    ExtractionConfidence,
-    LabelStructureCheckResult,
-    LinguisticCheckResult,
-)
 from fediaf_verifier.providers import AIProvider
 from fediaf_verifier.verifier import (
     create_providers,
+    generate_label_text,
+    verify_claims,
     verify_design_analysis,
+    verify_ean,
     verify_label,
+    verify_label_diff,
     verify_label_structure,
     verify_linguistic_only,
+    verify_market_compliance,
     verify_translation,
 )
 
@@ -207,6 +199,10 @@ if "structure_file_bytes" not in st.session_state:
     st.session_state.structure_file_bytes = None
 if "structure_media_type" not in st.session_state:
     st.session_state.structure_media_type = ""
+if "report_old_filename" not in st.session_state:
+    st.session_state.report_old_filename = ""
+if "report_new_filename" not in st.session_state:
+    st.session_state.report_new_filename = ""
 
 # -- Sidebar ---------------------------------------------------------------------------
 MARKETS = [
@@ -227,6 +223,11 @@ _MODE_LINGUISTIC = "\U0001f4dd Weryfikacja j\u0119zykowa"
 _MODE_STRUCTURE = "\U0001f524 Kontrola struktury i czcionki"
 _MODE_TRANSLATION = "\U0001f310 T\u0142umaczenie etykiety"
 _MODE_DESIGN = "\U0001f3a8 Analiza projektu graficznego"
+_MODE_EAN = "\U0001f4e6 Walidator EAN/kod\u00f3w"
+_MODE_CLAIMS = "\u2713 Walidator claim\u00f3w"
+_MODE_MARKET = "\U0001f30d Walidator rynkowy"
+_MODE_LABEL_TEXT = "\U0001f4dd Generator tekstu etykiety"
+_MODE_DIFF = "\U0001f504 Por\u00f3wnanie wersji"
 
 _TRANSLATION_LANGUAGES = {
     "en": "English",
@@ -246,44 +247,46 @@ _TRANSLATION_LANGUAGES = {
 }
 
 with st.sidebar:
-    # CSS: visual separator between verification group (items 1-3) and tools (4-5)
-    st.markdown("""
-<style>
-    /* Separator line between 3rd and 4th radio option */
-    section[data-testid="stSidebar"] div[role="radiogroup"] > label:nth-child(4) {
-        border-top: 1px solid rgba(128,128,128,0.2);
-        margin-top: 0.6rem;
-        padding-top: 0.6rem;
-    }
-    /* Compact radio spacing */
-    section[data-testid="stSidebar"] div[role="radiogroup"] > label {
-        padding: 0.25rem 0;
-    }
-</style>
-""", unsafe_allow_html=True)
+    # -- Two-level mode selector: segmented control + selectbox --
+    _GROUP_VERIFY = "\U0001f50d Weryfikacja"
+    _GROUP_TOOLS = "\U0001f527 Narz\u0119dzia"
+    _GROUP_DESIGN = "\U0001f3a8 Design"
 
-    verification_mode = st.radio(
-        "Tryb pracy",
-        [
-            _MODE_FULL,
-            _MODE_LINGUISTIC,
-            _MODE_STRUCTURE,
-            _MODE_TRANSLATION,
-            _MODE_DESIGN,
-        ],
-        captions=[
-            "Sk\u0142ad, FEDIAF, EU, opakowanie, j\u0119zyk",
-            "Ortografia, gramatyka, diakrytyki",
-            "Sekcje j\u0119zykowe, markery, czcionka",
-            "T\u0142umaczenie tre\u015bci na wybrany j\u0119zyk",
-            "Ocena designu z rekomendacjami dla R&D",
-        ],
+    _mode_group = st.segmented_control(
+        "Kategoria",
+        [_GROUP_VERIFY, _GROUP_TOOLS, _GROUP_DESIGN],
+        default=_GROUP_VERIFY,
+        label_visibility="collapsed",
     )
+    # segmented_control can return None if nothing selected
+    if _mode_group is None:
+        _mode_group = _GROUP_VERIFY
+
+    if _mode_group == _GROUP_VERIFY:
+        verification_mode = st.selectbox(
+            "Tryb",
+            [_MODE_FULL, _MODE_LINGUISTIC, _MODE_STRUCTURE, _MODE_CLAIMS, _MODE_MARKET],
+            label_visibility="collapsed",
+        )
+    elif _mode_group == _GROUP_TOOLS:
+        verification_mode = st.selectbox(
+            "Narz\u0119dzie",
+            [_MODE_TRANSLATION, _MODE_LABEL_TEXT, _MODE_DIFF, _MODE_EAN],
+            label_visibility="collapsed",
+        )
+    else:
+        verification_mode = _MODE_DESIGN
+        st.caption("Ocena designu etykiety z rekomendacjami dla R&D")
 
     is_linguistic_only = verification_mode == _MODE_LINGUISTIC
     is_structure_check = verification_mode == _MODE_STRUCTURE
     is_translation = verification_mode == _MODE_TRANSLATION
     is_design_analysis = verification_mode == _MODE_DESIGN
+    is_ean_check = verification_mode == _MODE_EAN
+    is_claims_check = verification_mode == _MODE_CLAIMS
+    is_market_check = verification_mode == _MODE_MARKET
+    is_label_text_gen = verification_mode == _MODE_LABEL_TEXT
+    is_diff_check = verification_mode == _MODE_DIFF
 
     # -- Mode-specific options --
     st.divider()
@@ -292,8 +295,22 @@ with st.sidebar:
     _translation_target_lang = ""
     _translation_target_name = ""
     _translation_notes = ""
+    _market_target_code = ""
+    _market_target_name = ""
 
-    if is_translation:
+    if is_market_check:
+        from fediaf_verifier.market_rules import MARKET_RULES as _MR
+        st.subheader("Rynek docelowy")
+        _market_display = [
+            f"{v['name']} ({k})" for k, v in _MR.items()
+        ]
+        _market_selection = st.selectbox("Kraj", _market_display)
+        _market_idx = _market_display.index(_market_selection)
+        _market_codes = list(_MR.keys())
+        _market_target_code = _market_codes[_market_idx]
+        _market_target_name = list(_MR.values())[_market_idx]["name"]
+
+    elif is_translation:
         st.subheader("Opcje t\u0142umaczenia")
         _tl_display = [
             f"{name} ({code})"
@@ -313,7 +330,7 @@ with st.sidebar:
             "zachowaj styl formalny...",
         )
 
-    elif not is_linguistic_only and not is_structure_check and not is_design_analysis:
+    elif not is_linguistic_only and not is_structure_check and not is_design_analysis and not is_ean_check and not is_claims_check and not is_market_check and not is_label_text_gen and not is_diff_check:
         # Full verification mode — market selector
         market_selection = st.selectbox(
             "Rynek docelowy",
@@ -327,7 +344,7 @@ with st.sidebar:
             None if market_selection == MARKETS[0] else market_selection
         )
 
-    if not is_linguistic_only and not is_structure_check and not is_translation and not is_design_analysis:
+    if not is_linguistic_only and not is_structure_check and not is_translation and not is_design_analysis and not is_ean_check and not is_claims_check and not is_market_check and not is_label_text_gen and not is_diff_check:
         st.divider()
 
         pdf_path = settings.fediaf_pdf_path
@@ -997,21 +1014,48 @@ pasteZone.addEventListener('click', function() { this.focus(); });
 if "pasted_image" not in st.session_state:
     st.session_state.pasted_image = None
 
-uploaded = st.file_uploader(
-    "Wgraj etykiet\u0119 produktu",
-    type=["jpg", "jpeg", "png", "pdf", "docx"],
-    help="JPG, PNG, PDF, DOCX lub wklej screenshot (Ctrl+V)",
-)
+# -- Diff mode: dual file uploaders ------------------------------------------------
+uploaded_old = None
+uploaded_new = None
 
-# Camera input as clipboard alternative (works on all Streamlit versions)
-with st.expander("\U0001f4f7 Zr\u00f3b zdj\u0119cie lub wklej screenshot", expanded=False):
-    camera_img = st.camera_input(
-        "Zr\u00f3b zdj\u0119cie etykiety",
-        help="Kliknij aby zrobi\u0107 zdj\u0119cie kamer\u0105 lub u\u017cyj jako "
-        "alternatyw\u0119 dla wklejania screenshot\u00f3w.",
+if is_diff_check:
+    st.subheader("Por\u00f3wnanie wersji etykiety")
+    col_old, col_new = st.columns(2)
+    with col_old:
+        uploaded_old = st.file_uploader(
+            "Stara wersja etykiety",
+            type=["jpg", "jpeg", "png", "pdf", "docx"],
+            help="Wgraj star\u0105 wersj\u0119 etykiety",
+            key="diff_old",
+        )
+    with col_new:
+        uploaded_new = st.file_uploader(
+            "Nowa wersja etykiety",
+            type=["jpg", "jpeg", "png", "pdf", "docx"],
+            help="Wgraj now\u0105 wersj\u0119 etykiety",
+            key="diff_new",
+        )
+    # Set uploaded to None — diff mode does not use the standard uploader
+    uploaded = None
+elif is_label_text_gen:
+    # Label text mode does not use file uploader — uses form instead
+    uploaded = None
+else:
+    uploaded = st.file_uploader(
+        "Wgraj etykiet\u0119 produktu",
+        type=["jpg", "jpeg", "png", "pdf", "docx"],
+        help="JPG, PNG, PDF, DOCX lub wklej screenshot (Ctrl+V)",
     )
-    if camera_img is not None:
-        uploaded = camera_img
+
+    # Camera input as clipboard alternative (works on all Streamlit versions)
+    with st.expander("\U0001f4f7 Zr\u00f3b zdj\u0119cie lub wklej screenshot", expanded=False):
+        camera_img = st.camera_input(
+            "Zr\u00f3b zdj\u0119cie etykiety",
+            help="Kliknij aby zrobi\u0107 zdj\u0119cie kamer\u0105 lub u\u017cyj jako "
+            "alternatyw\u0119 dla wklejania screenshot\u00f3w.",
+        )
+        if camera_img is not None:
+            uploaded = camera_img
 
 if uploaded:
     col_preview, col_info = st.columns([1, 2])
@@ -1048,6 +1092,12 @@ if uploaded:
         elif is_linguistic_only:
             st.markdown("**Tryb:** weryfikacja j\u0119zykowa")
             st.caption("Szybka analiza tekstu \u2014 ok. 10\u201320 sekund.")
+        elif is_claims_check:
+            st.markdown("**Tryb:** walidacja claim\u00f3w")
+            st.caption("Analiza claim\u00f3w vs sk\u0142ad \u2014 ok. 15\u201330 sekund.")
+        elif is_market_check:
+            st.markdown(f"**Tryb:** walidacja rynkowa ({_market_target_name})")
+            st.caption("Analiza wymog\u00f3w krajowych \u2014 ok. 20\u201340 sekund.")
         else:
             st.markdown(f"**Rynek:** {selected_market or 'nie wybrano'}")
             if selected_market:
@@ -1059,6 +1109,84 @@ if uploaded:
                 st.caption(
                     "Analiza bez trend\u00f3w \u2014 ok. 30\u201360 sekund."
                 )
+
+# -- Label text generation form (no file uploader) --------------------------------
+_label_text_form_data = {}
+if is_label_text_gen:
+    st.subheader("Generator tekstu etykiety")
+
+    _lt_species = st.selectbox(
+        "Gatunek", ["dog", "cat"], format_func=lambda x: {"dog": "Pies", "cat": "Kot"}[x]
+    )
+    _lt_c1, _lt_c2, _lt_c3 = st.columns(3)
+    with _lt_c1:
+        _lt_lifestage = st.selectbox(
+            "Etap \u017cycia",
+            ["adult", "puppy", "kitten", "senior", "all_stages"],
+            format_func=lambda x: {
+                "adult": "Doros\u0142y", "puppy": "Szczeni\u0119",
+                "kitten": "Koci\u0119", "senior": "Senior",
+                "all_stages": "Wszystkie etapy",
+            }[x],
+        )
+    with _lt_c2:
+        _lt_food_type = st.selectbox(
+            "Typ karmy",
+            ["dry", "wet", "semi_moist", "treat"],
+            format_func=lambda x: {
+                "dry": "Sucha", "wet": "Mokra",
+                "semi_moist": "P\u00f3\u0142wilgotna", "treat": "Przysmak",
+            }[x],
+        )
+    with _lt_c3:
+        _lt_language = st.selectbox(
+            "J\u0119zyk etykiety",
+            list(_TRANSLATION_LANGUAGES.keys()),
+            format_func=lambda x: f"{_TRANSLATION_LANGUAGES[x]} ({x})",
+        )
+
+    _lt_product_name = st.text_input(
+        "Nazwa produktu",
+        placeholder="np. Premium Adult Dog Chicken & Rice",
+    )
+    _lt_ingredients = st.text_area(
+        "Sk\u0142adniki (lista sk\u0142adu)",
+        height=120,
+        placeholder="np. mi\u0119so z kurczaka (30%), ry\u017c (20%), t\u0142uszcz drobiowy...",
+    )
+
+    st.markdown("**Sk\u0142adniki analityczne (%):**")
+    _nt_c1, _nt_c2, _nt_c3, _nt_c4 = st.columns(4)
+    with _nt_c1:
+        _lt_protein = st.number_input("Bia\u0142ko", min_value=0.0, max_value=100.0, value=0.0, step=0.1, key="lt_protein")
+        _lt_calcium = st.number_input("Wap\u0144", min_value=0.0, max_value=100.0, value=0.0, step=0.01, key="lt_calcium")
+    with _nt_c2:
+        _lt_fat = st.number_input("T\u0142uszcz", min_value=0.0, max_value=100.0, value=0.0, step=0.1, key="lt_fat")
+        _lt_phosphorus = st.number_input("Fosfor", min_value=0.0, max_value=100.0, value=0.0, step=0.01, key="lt_phosphorus")
+    with _nt_c3:
+        _lt_fibre = st.number_input("W\u0142\u00f3kno", min_value=0.0, max_value=100.0, value=0.0, step=0.1, key="lt_fibre")
+    with _nt_c4:
+        _lt_moisture = st.number_input("Wilgotno\u015b\u0107", min_value=0.0, max_value=100.0, value=0.0, step=0.1, key="lt_moisture")
+        _lt_ash = st.number_input("Popi\u00f3\u0142", min_value=0.0, max_value=100.0, value=0.0, step=0.1, key="lt_ash")
+
+    _label_text_form_data = {
+        "species": _lt_species,
+        "lifestage": _lt_lifestage,
+        "food_type": _lt_food_type,
+        "language": _lt_language,
+        "language_name": _TRANSLATION_LANGUAGES[_lt_language],
+        "product_name": _lt_product_name,
+        "ingredients": _lt_ingredients,
+        "nutrients": {
+            "crude_protein": _lt_protein,
+            "crude_fat": _lt_fat,
+            "crude_fibre": _lt_fibre,
+            "moisture": _lt_moisture,
+            "crude_ash": _lt_ash,
+            "calcium": _lt_calcium,
+            "phosphorus": _lt_phosphorus,
+        },
+    }
 
 
 # -- Verification ---------------------------------------------------------------------
@@ -1264,6 +1392,173 @@ def _run_design_analysis(uploaded_file) -> None:
     st.session_state.report_market = None
 
 
+def _run_ean_check(uploaded_file) -> None:
+    with st.spinner(
+        "Sprawdzam kody kreskowe i QR... (ok. 10\u201320 sekund)"
+    ):
+        try:
+            uploaded_file.seek(0)
+            label_b64, media_type = file_to_base64(
+                uploaded_file.read(), uploaded_file.name
+            )
+            result = verify_ean(
+                label_b64=label_b64,
+                media_type=media_type,
+                provider=secondary_provider,
+                settings=settings,
+            )
+        except ConversionError as e:
+            st.error(f"**B\u0142\u0105d pliku:** {e}")
+            return
+        except FediafVerifierError as e:
+            st.error(f"**B\u0142\u0105d API:** {e}")
+            return
+        except Exception as e:
+            st.error(f"**Nieoczekiwany b\u0142\u0105d:** {e}")
+            logger.exception("Unexpected error during EAN check")
+            return
+
+    st.session_state.report = result
+    st.session_state.report_filename = uploaded_file.name
+    st.session_state.report_market = None
+
+
+def _run_claims_check(uploaded_file) -> None:
+    with st.spinner(
+        "Sprawdzam sp\u00f3jno\u015b\u0107 claim\u00f3w ze sk\u0142adem... "
+        "(ok. 15\u201330 sekund)"
+    ):
+        try:
+            uploaded_file.seek(0)
+            label_b64, media_type = file_to_base64(
+                uploaded_file.read(), uploaded_file.name
+            )
+            result = verify_claims(
+                label_b64=label_b64,
+                media_type=media_type,
+                provider=secondary_provider,
+                settings=settings,
+            )
+        except ConversionError as e:
+            st.error(f"**B\u0142\u0105d pliku:** {e}")
+            return
+        except FediafVerifierError as e:
+            st.error(f"**B\u0142\u0105d API:** {e}")
+            return
+        except Exception as e:
+            st.error(f"**Nieoczekiwany b\u0142\u0105d:** {e}")
+            logger.exception("Unexpected error during claims check")
+            return
+
+    st.session_state.report = result
+    st.session_state.report_filename = uploaded_file.name
+    st.session_state.report_market = None
+
+
+def _run_market_check(uploaded_file, market_code: str) -> None:
+    with st.spinner(
+        "Sprawdzam zgodno\u015b\u0107 z wymogami krajowymi... "
+        "(ok. 20\u201340 sekund)"
+    ):
+        try:
+            uploaded_file.seek(0)
+            label_b64, media_type = file_to_base64(
+                uploaded_file.read(), uploaded_file.name
+            )
+            result = verify_market_compliance(
+                label_b64=label_b64,
+                media_type=media_type,
+                market_code=market_code,
+                provider=secondary_provider,
+                settings=settings,
+            )
+        except ConversionError as e:
+            st.error(f"**B\u0142\u0105d pliku:** {e}")
+            return
+        except FediafVerifierError as e:
+            st.error(f"**B\u0142\u0105d API:** {e}")
+            return
+        except Exception as e:
+            st.error(f"**Nieoczekiwany b\u0142\u0105d:** {e}")
+            logger.exception("Unexpected error during market check")
+            return
+
+    st.session_state.report = result
+    st.session_state.report_filename = uploaded_file.name
+    st.session_state.report_market = None
+
+
+def _run_label_text(form_data: dict) -> None:
+    lang_name = form_data.get("language_name", "")
+    with st.spinner(
+        f"Generuj\u0119 tekst etykiety ({lang_name})... "
+        "(ok. 20\u201340 sekund)"
+    ):
+        try:
+            result = generate_label_text(
+                species=form_data["species"],
+                lifestage=form_data["lifestage"],
+                food_type=form_data["food_type"],
+                ingredients=form_data["ingredients"],
+                nutrients=form_data["nutrients"],
+                target_language=form_data["language"],
+                target_language_name=lang_name,
+                provider=secondary_provider,
+                settings=settings,
+                product_name=form_data.get("product_name", ""),
+            )
+        except FediafVerifierError as e:
+            st.error(f"**B\u0142\u0105d API:** {e}")
+            return
+        except Exception as e:
+            st.error(f"**Nieoczekiwany b\u0142\u0105d:** {e}")
+            logger.exception("Unexpected error during label text generation")
+            return
+
+    st.session_state.report = result
+    st.session_state.report_filename = form_data.get("product_name", "") or "tekst_etykiety"
+    st.session_state.report_market = None
+
+
+def _run_diff_check(old_file, new_file) -> None:
+    with st.spinner(
+        "Por\u00f3wnuj\u0119 wersje etykiety... (ok. 20\u201340 sekund)"
+    ):
+        try:
+            old_file.seek(0)
+            old_b64, old_media_type = file_to_base64(
+                old_file.read(), old_file.name
+            )
+            new_file.seek(0)
+            new_b64, new_media_type = file_to_base64(
+                new_file.read(), new_file.name
+            )
+            result = verify_label_diff(
+                old_b64=old_b64,
+                old_media_type=old_media_type,
+                new_b64=new_b64,
+                new_media_type=new_media_type,
+                provider=secondary_provider,
+                settings=settings,
+            )
+        except ConversionError as e:
+            st.error(f"**B\u0142\u0105d pliku:** {e}")
+            return
+        except FediafVerifierError as e:
+            st.error(f"**B\u0142\u0105d API:** {e}")
+            return
+        except Exception as e:
+            st.error(f"**Nieoczekiwany b\u0142\u0105d:** {e}")
+            logger.exception("Unexpected error during diff check")
+            return
+
+    st.session_state.report = result
+    st.session_state.report_filename = new_file.name
+    st.session_state.report_old_filename = old_file.name
+    st.session_state.report_new_filename = new_file.name
+    st.session_state.report_market = None
+
+
 # -- Buttons -----------------------------------------------------------------------
 _has_translation_input = uploaded or bool(_translation_source_text.strip())
 
@@ -1277,6 +1572,31 @@ if is_translation and _has_translation_input and st.button(
         _translation_target_name,
         _translation_notes,
     )
+
+if uploaded and is_claims_check and st.button(
+    "Sprawd\u017a claimy", type="primary", use_container_width=True
+):
+    _run_claims_check(uploaded)
+
+if uploaded and is_market_check and st.button(
+    "Sprawd\u017a zgodno\u015b\u0107 rynkow\u0105", type="primary", use_container_width=True
+):
+    _run_market_check(uploaded, _market_target_code)
+
+if is_label_text_gen and _label_text_form_data.get("ingredients", "").strip() and st.button(
+    "Generuj tekst etykiety", type="primary", use_container_width=True
+):
+    _run_label_text(_label_text_form_data)
+
+if is_diff_check and uploaded_old and uploaded_new and st.button(
+    "Por\u00f3wnaj wersje", type="primary", use_container_width=True
+):
+    _run_diff_check(uploaded_old, uploaded_new)
+
+if uploaded and is_ean_check and st.button(
+    "Sprawd\u017a kody", type="primary", use_container_width=True
+):
+    _run_ean_check(uploaded)
 
 if uploaded and is_design_analysis and st.button(
     "Analizuj design", type="primary", use_container_width=True
@@ -1293,1048 +1613,25 @@ if uploaded and is_linguistic_only and st.button(
 ):
     _run_linguistic_only(uploaded)
 
-if uploaded and not is_linguistic_only and not is_structure_check and not is_translation and not is_design_analysis and st.button(
+if uploaded and not is_linguistic_only and not is_structure_check and not is_translation and not is_design_analysis and not is_ean_check and not is_claims_check and not is_market_check and not is_label_text_gen and not is_diff_check and st.button(
     "Sprawd\u017a etykiet\u0119", type="primary", use_container_width=True
 ):
     _run_verification(uploaded, selected_market)
 
 
-# -- Report rendering -----------------------------------------------------------------
-def _render_report(
-    report: EnrichedReport, filename: str, market: str | None
-) -> None:
-    st.divider()
-    st.subheader("Wyniki weryfikacji")
-
-    score = report.compliance_score
-    status = report.status.value
-    confidence = report.extraction_confidence
-    issues = report.issues
-    critical = sum(1 for i in issues if i.severity.value == "CRITICAL")
-    warnings = sum(1 for i in issues if i.severity.value == "WARNING")
-
-    # -- Status banner (Layer 4) -------------------------------------------------------
-    if report.requires_human_review:
-        if (
-            score < settings.manual_required_threshold
-            or confidence == ExtractionConfidence.LOW
-        ):
-            st.markdown(
-                '<div class="status-banner status-fail">'
-                "\u26d4 <strong>Sk\u0142ad wymaga korekty przed dopuszczeniem "
-                "do sprzeda\u017cy.</strong><br>"
-                "Pobierz raport i przeka\u017c do specjalisty ds. \u017cywienia."
-                "</div>",
-                unsafe_allow_html=True,
-            )
-        else:
-            st.markdown(
-                '<div class="status-banner status-warn">'
-                "\u26a0\ufe0f <strong>S\u0105 kwestie do sprawdzenia</strong> "
-                "\u2014 przejrzyj raport z ekspertem."
-                "</div>",
-                unsafe_allow_html=True,
-            )
-    else:
-        st.markdown(
-            '<div class="status-banner status-pass">'
-            "\u2705 <strong>Sk\u0142ad zgodny</strong> "
-            "\u2014 produkt gotowy do rynku."
-            "</div>",
-            unsafe_allow_html=True,
-        )
-
-    # -- Main metrics ------------------------------------------------------------------
-    STATUS_LABELS = {
-        "COMPLIANT": "\u2705 Zgodna",
-        "NON_COMPLIANT": "\u274c Niezgodna",
-        "REQUIRES_REVIEW": "\u26a0\ufe0f Do sprawdzenia",
-    }
-    CONF_LABELS = {
-        ExtractionConfidence.HIGH: "\U0001f7e2 Wysoka",
-        ExtractionConfidence.MEDIUM: "\U0001f7e1 \u015arednia",
-        ExtractionConfidence.LOW: "\U0001f534 Niska",
-    }
-
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Status", STATUS_LABELS.get(status, status))
-    col2.metric("Wynik zgodno\u015bci", f"{score}/100")
-    col3.metric("Pewno\u015b\u0107 odczytu", CONF_LABELS.get(confidence, str(confidence)))
-    col4.metric("Problemy", f"{critical} kryt. / {warnings} ostrze\u017c.")
-
-    # Score bar
-    bar_color = "#00b464" if score >= 90 else ("#ffb400" if score >= 70 else "#dc3232")
-    st.markdown(
-        f'<div class="score-bar-bg">'
-        f'<div class="score-bar-fill" style="width:{score}%;'
-        f'background:{bar_color}"></div></div>',
-        unsafe_allow_html=True,
-    )
-
-    # -- Reliability flags -------------------------------------------------------------
-    if report.reliability_flags:
-        with st.expander(
-            f"\u26a0\ufe0f Ostrze\u017cenia o rzetelno\u015bci "
-            f"({len(report.reliability_flags)})",
-            expanded=True,
-        ):
-            for flag in report.reliability_flags:
-                st.warning(flag)
-
-    # -- Cross-check -------------------------------------------------------------------
-    cross = report.cross_check_result
-    with st.expander("Weryfikacja krzy\u017cowa warto\u015bci liczbowych"):
-        if cross.passed is True:
-            st.success(
-                "Oba odczyty zgodne \u2014 warto\u015bci potwierdzone."
-            )
-        elif cross.passed is False:
-            st.error(
-                f"Rozbie\u017cno\u015bci mi\u0119dzy odczytami "
-                f"({len(cross.discrepancies)}) \u2014 "
-                "sprawd\u017a orygina\u0142 etykiety."
-            )
-            for d in cross.discrepancies:
-                st.write(
-                    f"\u2022 **{d.nutrient}**: odczyt g\u0142\u00f3wny "
-                    f"{d.main_value}%, weryfikacja {d.cross_value}% "
-                    f"(r\u00f3\u017cnica {d.difference}%)"
-                )
-        else:
-            st.info("Weryfikacja krzy\u017cowa nie by\u0142a mo\u017cliwa.")
-        if cross.reading_notes:
-            st.caption(f"Uwagi: {cross.reading_notes}")
-
-    # -- Linguistic check --------------------------------------------------------------
-    ling = report.linguistic_check_result
-    if ling.performed and ling.report:
-        lr = ling.report
-        issue_count = len(lr.issues)
-        QUALITY_LABELS = {
-            "excellent": ("\U0001f7e2", "Doskonala"),
-            "good": ("\U0001f535", "Dobra"),
-            "needs_review": ("\U0001f7e1", "Do poprawy"),
-            "poor": ("\U0001f534", "Slaba"),
-        }
-        q_icon, q_label = QUALITY_LABELS.get(
-            lr.overall_quality, ("\u26aa", lr.overall_quality)
-        )
-
-        with st.expander(
-            f"\U0001f4dd Weryfikacja j\u0119zykowa "
-            f"({issue_count} {'problem' if issue_count == 1 else 'problem\u00f3w'})",
-            expanded=issue_count > 0,
-        ):
-            mc1, mc2 = st.columns(2)
-            mc1.metric(
-                "J\u0119zyk", f"{lr.detected_language_name} ({lr.detected_language})"
-            )
-            mc2.metric("Jako\u015b\u0107 tekstu", f"{q_icon} {q_label}")
-
-            if lr.summary:
-                st.caption(lr.summary)
-
-            if lr.issues:
-                ISSUE_ICONS = {
-                    "spelling": "\U0001f4dd",
-                    "grammar": "\U0001f4d6",
-                    "punctuation": "\u270f\ufe0f",
-                    "diacritics": "\U0001f524",
-                    "terminology": "\U0001f500",
-                }
-                ISSUE_LABELS_PL = {
-                    "spelling": "Ortografia",
-                    "grammar": "Gramatyka",
-                    "punctuation": "Interpunkcja",
-                    "diacritics": "Diakrytyki",
-                    "terminology": "Terminologia",
-                }
-                for li in lr.issues:
-                    icon = ISSUE_ICONS.get(li.issue_type, "\u2022")
-                    type_label = ISSUE_LABELS_PL.get(
-                        li.issue_type, li.issue_type
-                    )
-                    from html import escape as _esc
-
-                    st.markdown(
-                        f"{icon} **[{type_label}]** "
-                        f'<s>{_esc(li.original)}</s> \u2192 '
-                        f"<strong>{_esc(li.suggestion)}</strong>  \n"
-                        f'<span style="opacity:0.6;font-size:0.85rem;">'
-                        f"{_esc(li.explanation)}</span>",
-                        unsafe_allow_html=True,
-                    )
-            else:
-                st.success(
-                    "Tekst na etykiecie bez b\u0142\u0119d\u00f3w "
-                    "\u2014 profesjonalna jako\u015b\u0107."
-                )
-    elif ling.error:
-        with st.expander("\U0001f4dd Weryfikacja j\u0119zykowa"):
-            st.info(
-                "Weryfikacja j\u0119zykowa nie by\u0142a mo\u017cliwa."
-            )
-
-    # -- Hard rules --------------------------------------------------------------------
-    if report.hard_rule_flags:
-        with st.expander(
-            f"\U0001f512 Regu\u0142y deterministyczne FEDIAF "
-            f"({len(report.hard_rule_flags)} problem\u00f3w)"
-        ):
-            st.caption(
-                "Poni\u017csze problemy zosta\u0142y wykryte przez regu\u0142y "
-                "zakodowane bezpo\u015brednio w Pythonie \u2014 "
-                "niezale\u017cnie od odpowiedzi modelu AI."
-            )
-            for flag in report.hard_rule_flags:
-                st.error(
-                    f"**[{flag.code}]** {flag.description}  \n"
-                    f"Odniesienie: {flag.fediaf_reference or '\u2014'}"
-                )
-
-    # -- Product data ------------------------------------------------------------------
-    with st.expander("Dane produktu i warto\u015bci od\u017cywcze", expanded=False):
-        p = report.product
-        c1, c2, c3 = st.columns(3)
-        c1.write(f"**Gatunek:** {p.species.value}")
-        c2.write(f"**Etap \u017cycia:** {p.lifestage.value}")
-        c3.write(f"**Typ karmy:** {p.food_type.value}")
-        if p.name:
-            st.write(f"**Nazwa:** {p.name}")
-        if p.brand:
-            st.write(f"**Marka:** {p.brand}")
-
-        nutrients = report.extracted_nutrients
-        uncertain_strs = set(report.values_requiring_manual_check)
-
-        NUTRIENT_LABELS = {
-            "crude_protein": "Bia\u0142ko surowe",
-            "crude_fat": "T\u0142uszcz surowy",
-            "crude_fibre": "W\u0142\u00f3kno surowe",
-            "moisture": "Wilgotno\u015b\u0107",
-            "crude_ash": "Popi\u00f3\u0142 surowy",
-            "calcium": "Wap\u0144",
-            "phosphorus": "Fosfor",
-        }
-
-        items = []
-        for key, label in NUTRIENT_LABELS.items():
-            val = getattr(nutrients, key)
-            if val is not None:
-                is_uncertain = any(key in s for s in uncertain_strs)
-                items.append((label, val, is_uncertain))
-
-        if items:
-            st.markdown("**Wyekstrahowane warto\u015bci od\u017cywcze:**")
-            n_cols = st.columns(4)
-            for idx, (label, val, uncertain_flag) in enumerate(items):
-                suffix = " \u26a0\ufe0f" if uncertain_flag else ""
-                n_cols[idx % 4].metric(label + suffix, f"{val}%")
-
-    # -- Regulatory issues -------------------------------------------------------------
-    st.subheader(f"Kwestie regulacyjne ({len(issues)})")
-    if not issues:
-        st.success("Nie wykryto problem\u00f3w regulacyjnych.")
-    else:
-        SEV_ICONS = {
-            "CRITICAL": "\U0001f534",
-            "WARNING": "\U0001f7e1",
-            "INFO": "\U0001f535",
-        }
-        SEV_LABELS = {
-            "CRITICAL": "Krytyczne",
-            "WARNING": "Ostrze\u017cenie",
-            "INFO": "Informacja",
-        }
-        for issue in issues:
-            sev = issue.severity.value
-            src = " [REGU\u0141A]" if issue.source == "HARD_RULE" else ""
-            label = SEV_LABELS.get(sev, sev)
-            with st.expander(
-                f"{SEV_ICONS.get(sev, '\u26aa')} [{label}{src}] "
-                f"{issue.description}"
-            ):
-                cols = st.columns(2)
-                if issue.fediaf_reference:
-                    cols[0].write(
-                        f"**Odniesienie FEDIAF:** {issue.fediaf_reference}"
-                    )
-                if issue.found_value is not None:
-                    cols[0].write(f"**Znaleziono:** {issue.found_value}")
-                if issue.required_value:
-                    cols[1].write(f"**Wymagane:** {issue.required_value}")
-                if issue.code:
-                    cols[1].write(f"**Kod:** `{issue.code}`")
-
-    # -- EU labelling ------------------------------------------------------------------
-    eu_check = report.eu_labelling_check
-    st.subheader("Wymagania etykietowania EU (Rozp. 767/2009)")
-    EU_LABELS = {
-        "ingredients_listed": "Lista sk\u0142adnik\u00f3w",
-        "analytical_constituents_present": "Sk\u0142adniki analityczne",
-        "manufacturer_info": "Dane producenta",
-        "net_weight_declared": "Masa netto",
-        "species_clearly_stated": "Gatunek zwierz\u0119cia",
-        "batch_or_date_present": "Numer partii / data",
-    }
-    eu_html = '<div class="eu-grid">'
-    for key, label in EU_LABELS.items():
-        val = getattr(eu_check, key)
-        icon = "\u2705" if val else "\u274c"
-        eu_html += f'<div class="eu-item">{icon} {label}</div>'
-    eu_html += "</div>"
-    st.markdown(eu_html, unsafe_allow_html=True)
-
-    # -- Packaging check --------------------------------------------------------------
-    pkg = report.packaging_check
-    st.subheader("Kontrola opakowania")
-
-    CLASSIFICATION_LABELS = {
-        "complete": "Karma pe\u0142noporcjowa",
-        "complementary": "Karma uzupe\u0142niaj\u0105ca",
-        "treat": "Przysmak",
-        "not_stated": "Nie okre\u015blono",
-    }
-
-    pkg_items_1 = {
-        "Instrukcja dawkowania": pkg.feeding_guidelines_present,
-        "Przechowywanie": pkg.storage_instructions_present,
-        "Symbol \u2117 przy masie": pkg.net_weight_e_symbol,
-        "Kraj pochodzenia": pkg.country_of_origin_stated,
-        "Oznaczenia recyklingu": pkg.recycling_symbols_present,
-        "Kod EAN widoczny": pkg.barcode_visible,
-    }
-    pkg_items_2 = {
-        "Kod QR widoczny": pkg.qr_code_visible,
-        "Emblemat gatunku": pkg.species_emblem_present,
-        "Miejsce na dat\u0119/parti\u0119": pkg.date_marking_area_present,
-        "T\u0142umaczenia kompletne": pkg.translations_complete,
-        "Kody kraj\u00f3w": pkg.country_codes_for_languages,
-        "O\u015bwiadczenie FEDIAF": pkg.compliance_statement_present,
-        "Kontakt do info (Art.19)": pkg.free_contact_for_info,
-        "Nr zatwierdzenia zak\u0142adu": pkg.establishment_approval_number,
-        "Czytelno\u015b\u0107 fontu": pkg.font_legibility_ok,
-        "Polski kompletny": pkg.polish_language_complete,
-    }
-
-    pkg_html = '<div class="eu-grid">'
-    for label, val in {**pkg_items_1, **pkg_items_2}.items():
-        icon = "\u2705" if val else "\u274c"
-        pkg_html += f'<div class="eu-item">{icon} {label}</div>'
-    pkg_html += "</div>"
-    st.markdown(pkg_html, unsafe_allow_html=True)
-
-    # Classification
-    cls_label = CLASSIFICATION_LABELS.get(
-        pkg.product_classification.value,
-        pkg.product_classification.value,
-    )
-    st.markdown(
-        f"**Klasyfikacja produktu:** {cls_label}"
-    )
-
-    # Claims consistency — the most important part
-    if not pkg.claims_consistent_with_composition or pkg.claims_inconsistencies:
-        st.markdown("**Sp\u00f3jno\u015b\u0107 claim\u00f3w ze sk\u0142adem:**")
-        if pkg.claims_inconsistencies:
-            for inc in pkg.claims_inconsistencies:
-                st.error(f"\u274c {inc}")
-        if not pkg.no_therapeutic_claims:
-            st.error(
-                "\u274c Wykryto claimy o charakterze leczniczym "
-                "(naruszenie EU 767/2009 Art.13)"
-            )
-    if not pkg.naming_percentage_rule_ok and pkg.naming_percentage_notes:
-        st.warning(
-            f"\u26a0\ufe0f Regu\u0142a % w nazwie: {pkg.naming_percentage_notes}"
-        )
-    # Regulatory alerts
-    if not pkg.free_contact_for_info:
-        st.warning(
-            "\u26a0\ufe0f Brak bezp\u0142atnego kontaktu do info o dodatkach "
-            "i sk\u0142adnikach (wymaganie Art.19 Reg 767/2009)"
-        )
-    if not pkg.establishment_approval_number:
-        st.warning(
-            "\u26a0\ufe0f Brak numeru zatwierdzenia/rejestracji zak\u0142adu "
-            "(wymaganie Reg 767/2009 + Reg 183/2005)"
-        )
-    if pkg.is_raw_product and not pkg.raw_warning_present:
-        st.error(
-            "\u274c Surowa karma wymaga ostrze\u017ce\u0144: "
-            '"PET FOOD ONLY" + "NOT FOR HUMAN CONSUMPTION" '
-            "(Reg 142/2011)"
-        )
-    if pkg.gmo_declaration_required and not pkg.gmo_declaration_present:
-        st.error(
-            "\u274c Sk\u0142adnik GMO >0.9% — brak obowi\u0105zkowej deklaracji "
-            "(Reg 1829/2003)"
-        )
-    if pkg.gmo_notes:
-        st.info(f"GMO: {pkg.gmo_notes}")
-    if pkg.contains_insect_protein and not pkg.insect_allergen_warning:
-        st.warning(
-            "\u26a0\ufe0f Bia\u0142ko owad\u00f3w — brak ostrze\u017cenia "
-            "o alergii krzy\u017cowej (EFSA guidance)"
-        )
-    if pkg.moisture_declaration_required and not pkg.moisture_declaration_present:
-        st.warning(
-            "\u26a0\ufe0f Wilgotno\u015b\u0107 >14% — deklaracja obowi\u0105zkowa "
-            "(767/2009 Annex V)"
-        )
-    if not pkg.font_legibility_ok and pkg.font_legibility_notes:
-        st.warning(
-            f"\u26a0\ufe0f Czytelno\u015b\u0107: {pkg.font_legibility_notes}"
-        )
-    if pkg.packaging_notes:
-        with st.expander("Dodatkowe uwagi"):
-            for note in pkg.packaging_notes:
-                st.write(f"\u2022 {note}")
-
-    # -- Recommendations ---------------------------------------------------------------
-    recs = report.recommendations
-    if recs:
-        st.subheader("Rekomendacje")
-        for rec in recs:
-            st.write(f"\u2192 {rec}")
-
-    # -- Market trends -----------------------------------------------------------------
-    trends = report.market_trends
-    if trends and market:
-        st.divider()
-        st.subheader(f"\U0001f4ca Trendy rynkowe \u2014 {market}")
-        POSITIONING_LABELS = {
-            "trendy": ("\U0001f7e2", "Zgodny z trendami"),
-            "standard": ("\U0001f535", "Standardowy sk\u0142ad"),
-            "outdated": ("\U0001f534", "Przestarza\u0142y sk\u0142ad"),
-            "niche": ("\U0001f7e1", "Niszowy / rosn\u0105cy"),
-        }
-        pos = trends.positioning.value
-        pos_icon, pos_label = POSITIONING_LABELS.get(pos, ("\u26aa", pos))
-        st.metric(
-            "Pozycjonowanie sk\u0142adu", f"{pos_icon} {pos_label}"
-        )
-        st.info(trends.summary)
-        if trends.trend_notes:
-            with st.expander("Szczeg\u00f3\u0142owe obserwacje"):
-                for note in trends.trend_notes:
-                    st.write(f"\u2022 {note}")
-
-    # -- Disclaimer footer -------------------------------------------------------------
-    st.markdown(
-        '<div class="footer-text">'
-        "Raport wygenerowany automatycznie. Wyniki poni\u017cej 85 pkt "
-        "lub oznaczone jako DO SPRAWDZENIA powinny zosta\u0107 "
-        "zweryfikowane przez specjalist\u0119 przed podj\u0119ciem decyzji.<br>"
-        "BULT \u00b7 Global Pet\u2019s Food \u00b7 Ko\u017amin Wlkp."
-        "</div>",
-        unsafe_allow_html=True,
-    )
-
-    # -- Export buttons ----------------------------------------------------------------
-    stem = Path(filename).stem
-    col_a, col_b = st.columns(2)
-    with col_a:
-        st.download_button(
-            "\u2b07 Pobierz raport JSON",
-            data=to_json(report),
-            file_name=f"raport_{stem}.json",
-            mime="application/json",
-            use_container_width=True,
-        )
-    with col_b:
-        st.download_button(
-            "\u2b07 Pobierz raport TXT",
-            data=to_text(report, filename, market),
-            file_name=f"raport_{stem}.txt",
-            mime="text/plain",
-            use_container_width=True,
-        )
-
-
-# -- Render linguistic-only report ----------------------------------------------------
-def _render_linguistic_report(
-    result: LinguisticCheckResult, filename: str,
-) -> None:
-    """Render standalone linguistic check results."""
-    st.divider()
-
-    if not result.performed or not result.report:
-        st.error(
-            f"**Weryfikacja j\u0119zykowa nie powiod\u0142a si\u0119.**\n\n"
-            f"{result.error or 'Nieznany b\u0142\u0105d.'}"
-        )
-        return
-
-    lr = result.report
-    issue_count = len(lr.issues)
-
-    # Quality banner
-    _QUALITY_MAP = {
-        "excellent": (
-            "success", "\u2705 Tekst bez b\u0142\u0119d\u00f3w "
-            "\u2014 profesjonalna jako\u015b\u0107."
-        ),
-        "good": (
-            "success", "\u2705 Tekst dobrej jako\u015bci "
-            "\u2014 drobne uwagi poni\u017cej."
-        ),
-        "needs_review": (
-            "warning", "\u26a0\ufe0f Tekst wymaga korekty "
-            "\u2014 przejrzyj uwagi poni\u017cej."
-        ),
-        "poor": (
-            "error", "\u26d4 Tekst wymaga gruntownej korekty "
-            "\u2014 liczne b\u0142\u0119dy."
-        ),
-    }
-    banner_type, banner_msg = _QUALITY_MAP.get(
-        lr.overall_quality, ("info", lr.overall_quality)
-    )
-    getattr(st, banner_type)(banner_msg)
-
-    # Metrics
-    _QUALITY_LABELS = {
-        "excellent": "\u2705 Doskona\u0142a",
-        "good": "\U0001f535 Dobra",
-        "needs_review": "\U0001f7e1 Do poprawy",
-        "poor": "\U0001f534 S\u0142aba",
-    }
-    quality_label = _QUALITY_LABELS.get(
-        lr.overall_quality, lr.overall_quality
-    )
-
-    mc1, mc2, mc3 = st.columns([2, 2, 1])
-    mc1.metric("J\u0119zyk", lr.detected_language_name)
-    mc2.metric("Jako\u015b\u0107", quality_label)
-    mc3.metric("Problemy", str(issue_count))
-
-    if lr.summary:
-        st.caption(lr.summary)
-
-    # Issues
-    if lr.issues:
-        _ISSUE_ICONS = {
-            "spelling": "\U0001f4dd",
-            "grammar": "\U0001f4d6",
-            "punctuation": "\u270f\ufe0f",
-            "diacritics": "\U0001f524",
-            "terminology": "\U0001f500",
-        }
-        _ISSUE_LABELS = {
-            "spelling": "Ortografia",
-            "grammar": "Gramatyka",
-            "punctuation": "Interpunkcja",
-            "diacritics": "Diakrytyki",
-            "terminology": "Terminologia",
-        }
-        st.subheader("Znalezione problemy")
-        from html import escape as _esc
-
-        for li in lr.issues:
-            icon = _ISSUE_ICONS.get(li.issue_type, "\u2022")
-            label = _ISSUE_LABELS.get(li.issue_type, li.issue_type)
-            st.markdown(
-                f"{icon} **[{label}]** "
-                f'<s>{_esc(li.original)}</s> \u2192 '
-                f"<strong>{_esc(li.suggestion)}</strong>  \n"
-                f'<span style="opacity:0.6;font-size:0.85rem;">'
-                f"{_esc(li.explanation)}</span>",
-                unsafe_allow_html=True,
-            )
-    else:
-        st.success(
-            "Tekst na etykiecie bez b\u0142\u0119d\u00f3w "
-            "\u2014 profesjonalna jako\u015b\u0107."
-        )
-
-    # Export
-    from fediaf_verifier.export import linguistic_to_text
-
-    st.divider()
-    txt = linguistic_to_text(result, filename)
-    stem = Path(filename).stem
-    st.download_button(
-        "\u2b07\ufe0f Pobierz raport j\u0119zykowy (TXT)",
-        data=txt,
-        file_name=f"jezyk_{stem}.txt",
-        mime="text/plain",
-        use_container_width=True,
-    )
-
-
-# -- Render structure check report -----------------------------------------------------
-def _render_structure_report(
-    result: LabelStructureCheckResult, filename: str,
-) -> None:
-    """Render label structure & font check results."""
-    st.divider()
-
-    if not result.performed or not result.report:
-        st.error(
-            f"**Kontrola struktury nie powiod\u0142a si\u0119.**\n\n"
-            f"{result.error or 'Nieznany b\u0142\u0105d.'}"
-        )
-        return
-
-    r = result.report
-
-    # Status banner
-    _STATUS_MAP = {
-        "ok": ("success", "\u2705 Struktura etykiety poprawna \u2014 "
-               "wszystkie sekcje j\u0119zykowe i czcionka w porz\u0105dku."),
-        "warnings": ("warning", "\u26a0\ufe0f Wykryto potencjalne problemy \u2014 "
-                     "przejrzyj uwagi poni\u017cej."),
-        "errors": ("error", "\u26d4 Wykryto b\u0142\u0119dy w strukturze lub czcionce \u2014 "
-                   "wymagana korekta przed drukiem."),
-    }
-    banner_type, banner_msg = _STATUS_MAP.get(
-        r.overall_status, ("info", r.overall_status)
-    )
-    getattr(st, banner_type)(banner_msg)
-
-    # Metrics
-    mc1, mc2, mc3 = st.columns(3)
-    mc1.metric("Sekcje j\u0119zykowe", str(r.section_count))
-    mc2.metric("Problemy strukturalne", str(len(r.structure_issues)))
-    mc3.metric("Problemy z czcionk\u0105", str(r.font_issues_count))
-
-    if r.summary:
-        st.caption(r.summary)
-
-    # -- Language sections overview --
-    if r.language_sections:
-        st.subheader("Sekcje j\u0119zykowe")
-        for sec in r.language_sections:
-            marker_icon = "\u2705" if sec.marker_present else "\u274c"
-            content_icon = "\u2705" if sec.content_present else "\u274c"
-            complete_icon = "\u2705" if sec.content_complete else "\u26a0\ufe0f"
-
-            with st.expander(
-                f"{marker_icon} [{sec.language_code.upper()}] "
-                f"{sec.language_name}",
-                expanded=not sec.content_complete or not sec.marker_present,
-            ):
-                c1, c2, c3 = st.columns(3)
-                c1.markdown(f"**Marker:** {marker_icon} "
-                           f"{sec.marker_type}: \"{sec.marker_text}\""
-                           if sec.marker_present
-                           else f"**Marker:** {marker_icon} BRAK")
-                c2.markdown(f"**Tre\u015b\u0107:** {content_icon}")
-                c3.markdown(f"**Kompletna:** {complete_icon}")
-
-                if sec.section_elements:
-                    st.markdown(
-                        "**Obecne elementy:** "
-                        + ", ".join(sec.section_elements)
-                    )
-                if sec.missing_elements:
-                    st.warning(
-                        "**Brakuj\u0105ce elementy:** "
-                        + ", ".join(sec.missing_elements)
-                    )
-                if sec.notes:
-                    st.caption(sec.notes)
-
-    # -- Diacritics check per language --
-    if r.diacritics_check:
-        st.subheader("Kompletno\u015b\u0107 diakrytyk\u00f3w")
-        _LANG_DIACRITICS = {
-            "pl": "\u0105\u0119\u015b\u0107\u017a\u017c\u0142\u0144\u00f3",
-            "de": "\u00e4\u00f6\u00fc\u00df",
-            "cs": "\u0159\u0161\u010d\u017e\u016f\u011b",
-            "hu": "\u00e1\u00e9\u00ed\u00f3\u00f6\u0151\u00fa\u00fc\u0171",
-            "ro": "\u0103\u00e2\u00ee\u0219\u021b",
-            "fr": "\u00e9\u00e8\u00ea\u00e7\u00e0\u00f4",
-            "it": "\u00e0\u00e8\u00e9\u00ec\u00f2\u00f9",
-            "es": "\u00f1\u00e1\u00e9\u00ed\u00f3\u00fa\u00fc",
-        }
-        cols = st.columns(min(len(r.diacritics_check), 4))
-        for idx, (lang, ok) in enumerate(r.diacritics_check.items()):
-            col = cols[idx % len(cols)]
-            icon = "\u2705" if ok else "\u274c"
-            chars = _LANG_DIACRITICS.get(lang, "")
-            col.markdown(
-                f"{icon} **{lang.upper()}**"
-                + (f"  \n{chars}" if chars else "")
-            )
-
-    # -- Structure issues --
-    if r.structure_issues:
-        st.subheader(
-            f"Problemy strukturalne ({len(r.structure_issues)})"
-        )
-        _SEV_ICONS = {
-            "critical": "\U0001f534",
-            "warning": "\U0001f7e1",
-            "info": "\U0001f535",
-        }
-        _SEV_LABELS = {
-            "critical": "Krytyczny",
-            "warning": "Ostrze\u017cenie",
-            "info": "Informacja",
-        }
-        _TYPE_LABELS = {
-            "missing_marker": "Brak markera",
-            "orphaned_text": "Osierocony tekst",
-            "section_overlap": "Nak\u0142adanie si\u0119 sekcji",
-            "section_gap": "Luka mi\u0119dzy sekcjami",
-            "marker_damaged": "Uszkodzony marker",
-            "inconsistent_order": "Niesp\u00f3jny porz\u0105dek",
-            "missing_section": "Brak sekcji",
-            "duplicate_marker": "Duplikat markera",
-        }
-        from html import escape as _esc
-
-        for si in r.structure_issues:
-            sev_icon = _SEV_ICONS.get(si.severity, "\u26aa")
-            sev_label = _SEV_LABELS.get(si.severity, si.severity)
-            type_label = _TYPE_LABELS.get(si.issue_type, si.issue_type)
-            langs = ", ".join(
-                c.upper() for c in si.affected_languages
-            ) if si.affected_languages else "\u2014"
-
-            st.markdown(
-                f"{sev_icon} **[{sev_label}] {type_label}** \u2014 "
-                f"{_esc(si.description)}  \n"
-                f'<span style="opacity:0.6;font-size:0.85rem;">'
-                f"J\u0119zyki: {_esc(langs)}"
-                f"{f' | Lokalizacja: {_esc(si.location)}' if si.location else ''}"
-                f"</span>",
-                unsafe_allow_html=True,
-            )
-
-    # -- Glyph/font issues --
-    if r.glyph_issues:
-        st.subheader(
-            f"Problemy z czcionk\u0105 / glifami ({len(r.glyph_issues)})"
-        )
-        _GLYPH_ICONS = {
-            "missing_glyph": "\u274c",
-            "substituted_glyph": "\U0001f500",
-            "blank_space": "\u2b1c",
-            "tofu_box": "\u25a1",
-            "wrong_diacritic": "\U0001f524",
-            "encoding_error": "\u26a0\ufe0f",
-        }
-        _GLYPH_LABELS = {
-            "missing_glyph": "Brak glifa",
-            "substituted_glyph": "Podmieniony glif",
-            "blank_space": "Puste miejsce",
-            "tofu_box": "Kwadracik (tofu)",
-            "wrong_diacritic": "Z\u0142y diakrytyk",
-            "encoding_error": "B\u0142\u0105d enkodowania",
-        }
-        for gi in r.glyph_issues:
-            g_icon = _GLYPH_ICONS.get(gi.issue_type, "\u2022")
-            g_label = _GLYPH_LABELS.get(gi.issue_type, gi.issue_type)
-            chars_str = (
-                " \u2014 brakuje: " + " ".join(gi.missing_characters)
-                if gi.missing_characters else ""
-            )
-            from html import escape as _esc
-
-            # Use HTML for affected/expected text to avoid markdown escaping
-            st.markdown(
-                f"{g_icon} **[{gi.language_code.upper()}] [{g_label}]** "
-                f'<s>{_esc(gi.affected_text)}</s> \u2192 '
-                f"<strong>{_esc(gi.expected_text)}</strong>"
-                f"{chars_str}  \n"
-                f'<span style="opacity:0.6;font-size:0.85rem;">'
-                f"{_esc(gi.explanation)}"
-                f"{f' | {_esc(gi.location)}' if gi.location else ''}"
-                f"</span>",
-                unsafe_allow_html=True,
-            )
-
-    if not r.structure_issues and not r.glyph_issues:
-        st.success(
-            "Nie wykryto problem\u00f3w strukturalnych ani z czcionk\u0105 "
-            "\u2014 etykieta gotowa do druku."
-        )
-
-    # Export section
-    st.divider()
-    st.subheader("Pobierz wyniki")
-    stem = Path(filename).stem
-
-    # Row 1: TXT report + JSX script
-    col_txt, col_jsx = st.columns(2)
-    with col_txt:
-        txt = structure_to_text(result, filename)
-        st.download_button(
-            "\u2b07\ufe0f Raport (TXT)",
-            data=txt,
-            file_name=f"struktura_{stem}.txt",
-            mime="text/plain",
-            use_container_width=True,
-        )
-
-    with col_jsx:
-        from fediaf_verifier.jsx_generator import generate_jsx
-
-        jsx_script = generate_jsx(result.report, filename)
-        st.download_button(
-            "\u2b07\ufe0f Skrypt Illustrator (.jsx)",
-            data=jsx_script,
-            file_name=f"qc_{stem}.jsx",
-            mime="application/javascript",
-            use_container_width=True,
-            help=(
-                "Otw\u00f3rz etykiet\u0119 w Illustratorze, "
-                "potem File > Scripts > Other Script > wybierz ten plik. "
-                "Doda warstw\u0119 'QC Annotations' z oznaczeniami."
-            ),
-        )
-
-    # Row 2: Annotated PDF/image (if source file available)
-    file_bytes = st.session_state.get("structure_file_bytes")
-    media_type = st.session_state.get("structure_media_type", "")
-
-    if file_bytes and result.report:
-        from fediaf_verifier.annotator import annotate_file
-
-        annotated_bytes, out_mime = annotate_file(
-            file_bytes, media_type, result.report,
-        )
-        if annotated_bytes:
-            ext = "pdf" if "pdf" in out_mime else "png"
-            st.download_button(
-                f"\u2b07\ufe0f Etykieta z oznaczeniami (.{ext})",
-                data=annotated_bytes,
-                file_name=f"annotated_{stem}.{ext}",
-                mime=out_mime,
-                use_container_width=True,
-                help=(
-                    "Kopia etykiety z naniesionymi prostok\u0105tami "
-                    "oznaczaj\u0105cymi wykryte problemy."
-                ),
-            )
-        elif media_type not in ("application/pdf", "image/jpeg", "image/png"):
-            st.caption(
-                "Adnotacje wizualne dost\u0119pne tylko dla PDF i obraz\u00f3w. "
-                "Dla plik\u00f3w .ai u\u017cyj skryptu JSX powy\u017cej."
-            )
-
-
-# -- Render translation report ---------------------------------------------------------
-def _render_translation_report(result, filename: str) -> None:
-    st.divider()
-
-    if not result.performed or not result.report:
-        st.error(
-            f"**T\u0142umaczenie nie powiod\u0142o si\u0119.**\n\n"
-            f"{result.error or 'Nieznany b\u0142\u0105d.'}"
-        )
-        return
-
-    r = result.report
-    st.success(
-        f"\u2705 T\u0142umaczenie uko\u0144czone: "
-        f"{r.source_language_name} \u2192 {r.target_language_name}"
-    )
-
-    mc1, mc2, mc3 = st.columns(3)
-    mc1.metric(
-        "J\u0119zyk \u017ar\u00f3d\u0142owy",
-        f"{r.source_language_name} ({r.source_language})",
-    )
-    mc2.metric(
-        "J\u0119zyk docelowy",
-        f"{r.target_language_name} ({r.target_language})",
-    )
-    mc3.metric("Sekcje", str(len(r.sections)))
-
-    if r.summary:
-        st.caption(r.summary)
-
-    # Sections side-by-side
-    for sec in r.sections:
-        with st.expander(
-            f"\U0001f4c4 {sec.section_name}", expanded=True
-        ):
-            col_orig, col_trans = st.columns(2)
-            with col_orig:
-                st.markdown(f"**Orygina\u0142:**")
-                st.text(sec.original_text)
-            with col_trans:
-                st.markdown(f"**T\u0142umaczenie:**")
-                st.text(sec.translated_text)
-            if sec.notes:
-                st.caption(f"\U0001f4dd {sec.notes}")
-
-    if r.overall_notes:
-        st.info(f"**Uwagi:** {r.overall_notes}")
-
-    # Export
-    st.divider()
-    stem = Path(filename).stem
-    st.download_button(
-        "\u2b07\ufe0f Pobierz t\u0142umaczenie (TXT)",
-        data=translation_to_text(result, filename),
-        file_name=f"tlumaczenie_{stem}.txt",
-        mime="text/plain",
-        use_container_width=True,
-    )
-
-
-# -- Render design analysis report -----------------------------------------------------
-def _render_design_report(result, filename: str) -> None:
-    from html import escape as _esc
-
-    st.divider()
-
-    if not result.performed or not result.report:
-        st.error(
-            f"**Analiza graficzna nie powiod\u0142a si\u0119.**\n\n"
-            f"{result.error or 'Nieznany b\u0142\u0105d.'}"
-        )
-        return
-
-    r = result.report
-    score = r.overall_score
-
-    # Status banner
-    if score >= 80:
-        st.success(
-            f"\u2705 **Ocena: {score}/100** \u2014 {r.overall_assessment}"
-        )
-    elif score >= 60:
-        st.warning(
-            f"\u26a0\ufe0f **Ocena: {score}/100** \u2014 {r.overall_assessment}"
-        )
-    else:
-        st.error(
-            f"\u26d4 **Ocena: {score}/100** \u2014 {r.overall_assessment}"
-        )
-
-    # Metrics
-    best_cat = max(r.category_scores, key=lambda c: c.score) if r.category_scores else None
-    worst_cat = min(r.category_scores, key=lambda c: c.score) if r.category_scores else None
-
-    mc1, mc2, mc3, mc4 = st.columns(4)
-    mc1.metric("Ocena og\u00f3lna", f"{score}/100")
-    mc2.metric("Problemy", str(len(r.issues)))
-    if best_cat:
-        mc3.metric("Najlepsza", f"{best_cat.category_name} ({best_cat.score})")
-    if worst_cat:
-        mc4.metric("Najs\u0142absza", f"{worst_cat.category_name} ({worst_cat.score})")
-
-    # Score bar
-    bar_color = "#00b464" if score >= 80 else ("#ffb400" if score >= 60 else "#dc3232")
-    st.markdown(
-        f'<div class="score-bar-bg">'
-        f'<div class="score-bar-fill" style="width:{score}%;'
-        f'background:{bar_color}"></div></div>',
-        unsafe_allow_html=True,
-    )
-
-    # Strengths
-    if r.strengths:
-        with st.expander(
-            f"\u2705 Mocne strony ({len(r.strengths)})", expanded=True
-        ):
-            for s in r.strengths:
-                st.markdown(f"\u2022 {_esc(s)}", unsafe_allow_html=True)
-
-    # Category scores
-    if r.category_scores:
-        st.subheader("Oceny per kategoria")
-        for cat in r.category_scores:
-            cat_color = (
-                "\U0001f7e2" if cat.score >= 80
-                else ("\U0001f7e1" if cat.score >= 60 else "\U0001f534")
-            )
-            with st.expander(
-                f"{cat_color} {cat.category_name} \u2014 {cat.score}/100",
-                expanded=cat.score < 60,
-            ):
-                if cat.findings:
-                    st.markdown("**Obserwacje:**")
-                    for f in cat.findings:
-                        st.write(f"\u2022 {f}")
-                if cat.recommendations:
-                    st.markdown("**Rekomendacje:**")
-                    for rec in cat.recommendations:
-                        st.write(f"\u2192 {rec}")
-
-    # Issues sorted by severity
-    if r.issues:
-        _SEV_ICONS = {
-            "critical": "\U0001f534",
-            "major": "\U0001f7e0",
-            "minor": "\U0001f7e1",
-            "suggestion": "\U0001f535",
-        }
-        _SEV_LABELS = {
-            "critical": "Krytyczny",
-            "major": "Istotny",
-            "minor": "Drobny",
-            "suggestion": "Sugestia",
-        }
-        _SEV_ORDER = {"critical": 0, "major": 1, "minor": 2, "suggestion": 3}
-        sorted_issues = sorted(
-            r.issues, key=lambda i: _SEV_ORDER.get(i.severity, 9)
-        )
-        st.subheader(f"Problemy ({len(r.issues)})")
-        for issue in sorted_issues:
-            icon = _SEV_ICONS.get(issue.severity, "\u26aa")
-            label = _SEV_LABELS.get(issue.severity, issue.severity)
-            st.markdown(
-                f"{icon} **[{label}]** {_esc(issue.description)}  \n"
-                f'<span style="opacity:0.6;font-size:0.85rem;">'
-                f"\u2192 {_esc(issue.recommendation)}"
-                f"{f' | {_esc(issue.location)}' if issue.location else ''}"
-                f"</span>",
-                unsafe_allow_html=True,
-            )
-
-    # Competitive benchmarks
-    if r.competitive_benchmarks:
-        with st.expander(
-            f"\U0001f4ca Benchmark konkurencyjny ({len(r.competitive_benchmarks)})"
-        ):
-            for bm in r.competitive_benchmarks:
-                st.markdown(f"**{bm.aspect}**")
-                c1, c2 = st.columns(2)
-                c1.write(f"Obecny: {bm.current_level}")
-                c2.write(f"Standard: {bm.industry_standard}")
-                st.write(f"\u2192 {bm.suggestion}")
-                st.divider()
-
-    # Trend alignment
-    if r.trend_alignment:
-        with st.expander(
-            f"\U0001f4c8 Trendy bran\u017cowe ({len(r.trend_alignment)})"
-        ):
-            for t in r.trend_alignment:
-                st.write(f"\u2022 {t}")
-
-    # Executive summary for R&D
-    if r.actionable_summary:
-        st.subheader("\U0001f3af Podsumowanie dla R&D")
-        st.info(r.actionable_summary)
-
-    # Export
-    st.divider()
-    stem = Path(filename).stem
-    col_a, col_b = st.columns(2)
-    with col_a:
-        st.download_button(
-            "\u2b07\ufe0f Raport (TXT)",
-            data=design_to_text(result, filename),
-            file_name=f"design_{stem}.txt",
-            mime="text/plain",
-            use_container_width=True,
-        )
-    with col_b:
-        st.download_button(
-            "\u2b07\ufe0f Raport (JSON)",
-            data=result.report.model_dump_json(indent=2, exclude_none=True),
-            file_name=f"design_{stem}.json",
-            mime="application/json",
-            use_container_width=True,
-        )
+# -- Report rendering (imported from renderers.py) ------------------------------------
+from fediaf_verifier.renderers import (
+    render_claims_report,
+    render_design_report,
+    render_diff_report,
+    render_ean_report,
+    render_label_text_report,
+    render_linguistic_report,
+    render_market_report,
+    render_report,
+    render_structure_report,
+    render_translation_report,
+)
 
 
 # -- Render saved report ---------------------------------------------------------------
@@ -2342,29 +1639,27 @@ if st.session_state.report is not None:
     report = st.session_state.report
     # Use class name for dispatch — robust against Streamlit hot-reload
     _report_type = type(report).__name__
-    if _report_type == "TranslationResult":
-        _render_translation_report(
+    if _report_type == "ClaimsCheckResult":
+        render_claims_report(report, st.session_state.report_filename)
+    elif _report_type == "MarketCheckResult":
+        render_market_report(report, st.session_state.report_filename)
+    elif _report_type == "LabelTextResult":
+        render_label_text_report(report, st.session_state.report_filename)
+    elif _report_type == "LabelDiffResult":
+        render_diff_report(
             report,
-            st.session_state.report_filename,
+            st.session_state.report_old_filename,
+            st.session_state.report_new_filename,
         )
+    elif _report_type == "EANCheckResult":
+        render_ean_report(report, st.session_state.report_filename)
+    elif _report_type == "TranslationResult":
+        render_translation_report(report, st.session_state.report_filename)
     elif _report_type == "DesignAnalysisResult":
-        _render_design_report(
-            report,
-            st.session_state.report_filename,
-        )
+        render_design_report(report, st.session_state.report_filename)
     elif _report_type == "LabelStructureCheckResult":
-        _render_structure_report(
-            report,
-            st.session_state.report_filename,
-        )
+        render_structure_report(report, st.session_state.report_filename)
     elif _report_type == "LinguisticCheckResult":
-        _render_linguistic_report(
-            report,
-            st.session_state.report_filename,
-        )
+        render_linguistic_report(report, st.session_state.report_filename)
     else:
-        _render_report(
-            report,
-            st.session_state.report_filename,
-            st.session_state.report_market,
-        )
+        render_report(report, st.session_state.report_filename, st.session_state.report_market, settings)

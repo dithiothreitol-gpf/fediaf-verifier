@@ -2,10 +2,15 @@
 
 
 from fediaf_verifier.models import (
+    ClaimsCheckResult,
     DesignAnalysisResult,
+    EANCheckResult,
     EnrichedReport,
+    LabelDiffResult,
     LabelStructureCheckResult,
+    LabelTextResult,
     LinguisticCheckResult,
+    MarketCheckResult,
     TranslationResult,
 )
 
@@ -559,6 +564,446 @@ def design_to_text(
         lines.append("PODSUMOWANIE DLA R&D:")
         lines.append("-" * 40)
         lines.append(f"  {r.actionable_summary}")
+        lines.append("")
+
+    lines.extend([
+        "=" * 60,
+        "Raport wygenerowany automatycznie. BULT Quality Check.",
+        "=" * 60,
+    ])
+
+    return "\n".join(lines)
+
+
+def ean_to_text(result: EANCheckResult, filename: str) -> str:
+    """Format EAN/barcode check as human-readable text."""
+    lines = [
+        "=" * 60,
+        "WALIDACJA KODOW KRESKOWYCH I QR",
+        "BULT Quality Check",
+        "=" * 60,
+        f"Plik: {filename}",
+        "",
+    ]
+
+    if not result.performed or not result.report:
+        lines.append(
+            f"Walidacja nie powiodla sie: {result.error or 'nieznany blad'}"
+        )
+        return "\n".join(lines)
+
+    r = result.report
+    lines.extend([
+        f"Kodow kreskowych: {r.barcodes_found}",
+        f"Wszystkie poprawne: {'TAK' if r.all_valid else 'NIE'}",
+        "",
+    ])
+
+    if r.ean_results:
+        lines.append("KODY KRESKOWE:")
+        lines.append("-" * 40)
+        for ean in r.ean_results:
+            valid = "OK" if ean.check_digit_valid else "BLEDNY"
+            lines.append(
+                f"  [{valid}] {ean.barcode_type}: {ean.barcode_number}"
+            )
+            if ean.country_name:
+                lines.append(
+                    f"    Kraj: {ean.country_name} (prefiks {ean.country_prefix})"
+                )
+            if not ean.check_digit_valid and ean.expected_check_digit:
+                lines.append(
+                    f"    Oczekiwana cyfra kontrolna: {ean.expected_check_digit}"
+                )
+            if ean.notes:
+                lines.append(f"    Uwagi: {ean.notes}")
+        lines.append("")
+
+    if r.qr_codes:
+        lines.append("KODY QR:")
+        lines.append("-" * 40)
+        for qr in r.qr_codes:
+            status = "czytelny" if qr.readable else "nieczytelny"
+            lines.append(f"  [{status}] {qr.content or '(brak tresci)'}")
+            if qr.notes:
+                lines.append(f"    Uwagi: {qr.notes}")
+        lines.append("")
+
+    if r.summary:
+        lines.append(f"Podsumowanie: {r.summary}")
+        lines.append("")
+
+    lines.extend([
+        "=" * 60,
+        "Raport wygenerowany automatycznie. BULT Quality Check.",
+        "=" * 60,
+    ])
+
+    return "\n".join(lines)
+
+
+def claims_to_text(result: ClaimsCheckResult, filename: str) -> str:
+    """Format claims vs composition check as human-readable text."""
+    lines = [
+        "=" * 60,
+        "WALIDACJA CLAIMOW VS SKLAD",
+        "BULT Quality Check",
+        "=" * 60,
+        f"Plik: {filename}",
+        "",
+    ]
+
+    if not result.performed or not result.report:
+        lines.append(
+            f"Walidacja nie powiodla sie: {result.error or 'nieznany blad'}"
+        )
+        return "\n".join(lines)
+
+    r = result.report
+
+    CONSISTENCY_LABELS = {
+        "consistent": "SPOJNE — brak problemow",
+        "inconsistencies_found": "NIESPOJNOSCI — wykryto problemy",
+        "critical_issues": "KRYTYCZNE — wymagana natychmiastowa korekta",
+    }
+    lines.extend([
+        f"Status: {CONSISTENCY_LABELS.get(r.overall_consistency, r.overall_consistency)}",
+        f"Wynik: {r.score}/100",
+        f"Podsumowanie: {r.summary}",
+        "",
+    ])
+
+    # Claims found
+    if r.claims_found:
+        lines.append(f"ZNALEZIONE CLAIMY ({len(r.claims_found)}):")
+        for claim in r.claims_found:
+            lines.append(f"  - {claim}")
+        lines.append("")
+
+    # Ingredients with percentages
+    if r.ingredients_with_percentages:
+        lines.append("SKLADNIKI Z PROCENTAMI:")
+        for ing in r.ingredients_with_percentages:
+            lines.append(f"  - {ing}")
+        lines.append("")
+
+    # Claim validations
+    if r.claim_validations:
+        SEV_MAP = {
+            "critical": "KRYTYCZNY",
+            "warning": "OSTRZEZENIE",
+            "info": "INFO",
+        }
+        lines.append(f"WERYFIKACJA CLAIMOW ({len(r.claim_validations)}):")
+        lines.append("-" * 40)
+        for cv in r.claim_validations:
+            sev = SEV_MAP.get(cv.severity, cv.severity.upper())
+            status = "OK" if cv.is_consistent else "NIESPOJNY"
+            lines.append(
+                f"  [{status}][{sev}] {cv.claim_text} ({cv.claim_category})"
+            )
+            if not cv.is_consistent and cv.inconsistency_description:
+                lines.append(f"    Problem: {cv.inconsistency_description}")
+            if cv.relevant_ingredients:
+                lines.append(
+                    f"    Skladniki: {', '.join(cv.relevant_ingredients)}"
+                )
+            if cv.recommendation:
+                lines.append(f"    -> {cv.recommendation}")
+        lines.append("")
+
+    # Naming rule check
+    if r.naming_rule_check:
+        nr = r.naming_rule_check
+        status = "OK" if nr.compliant else "NIEZGODNY"
+        lines.append("REGULA % W NAZWIE (EU 767/2009):")
+        lines.append("-" * 40)
+        lines.append(f"  [{status}] Nazwa: {nr.product_name}")
+        lines.append(
+            f"    Slowo kluczowe: \"{nr.trigger_word}\" "
+            f"-> min {nr.required_minimum_percent}% {nr.ingredient_name}"
+        )
+        if nr.actual_percent is not None:
+            lines.append(f"    Faktyczny %: {nr.actual_percent}%")
+        if nr.notes:
+            lines.append(f"    Uwagi: {nr.notes}")
+        lines.append("")
+
+    # Grain-free check
+    if r.grain_free_check_passed is not None:
+        status = "OK" if r.grain_free_check_passed else "NIESPOJNY"
+        lines.append(f"CLAIM \"BEZ ZBOZ\": [{status}]")
+        if r.grain_ingredients_found:
+            lines.append(
+                f"  Znalezione zboze: {', '.join(r.grain_ingredients_found)}"
+            )
+        lines.append("")
+
+    # Therapeutic claims
+    if r.therapeutic_claims_found:
+        lines.append(
+            f"CLAIMY TERAPEUTYCZNE (ZABRONIONE) ({len(r.therapeutic_claims_found)}):"
+        )
+        for tc in r.therapeutic_claims_found:
+            lines.append(f"  ! {tc}")
+        lines.append("")
+
+    lines.extend([
+        "=" * 60,
+        "Raport wygenerowany automatycznie. BULT Quality Check.",
+        "=" * 60,
+    ])
+
+    return "\n".join(lines)
+
+
+def label_text_to_text(result: LabelTextResult, product_name: str = "") -> str:
+    """Format generated label text as human-readable output."""
+    lines = [
+        "=" * 60,
+        "WYGENEROWANY TEKST ETYKIETY",
+        "BULT Quality Check",
+        "=" * 60,
+    ]
+    if product_name:
+        lines.append(f"Produkt: {product_name}")
+    lines.append("")
+
+    if not result.performed or not result.report:
+        lines.append(
+            f"Generowanie nie powiodlo sie: {result.error or 'nieznany blad'}"
+        )
+        return "\n".join(lines)
+
+    r = result.report
+    lines.extend([
+        f"Jezyk: {r.language_name} ({r.language})",
+        f"Gatunek: {r.species}",
+        f"Etap zycia: {r.lifestage}",
+        f"Typ karmy: {r.food_type}",
+        "",
+    ])
+
+    # Sections
+    if r.sections:
+        for sec in r.sections:
+            lines.append("-" * 60)
+            lines.append(f"SEKCJA: {sec.section_title}")
+            if sec.regulatory_reference:
+                lines.append(f"  Regulacja: {sec.regulatory_reference}")
+            lines.append("-" * 60)
+            for ln in sec.content.splitlines():
+                lines.append(f"  {ln}")
+            if sec.notes:
+                lines.append(f"  Uwagi: {sec.notes}")
+            lines.append("")
+
+    # Feeding table
+    if r.feeding_table:
+        lines.append("TABELA DAWKOWANIA:")
+        lines.append("-" * 40)
+        lines.append(f"  {'Masa ciala':<20} {'Dawka dzienna':<20}")
+        lines.append(f"  {'-' * 18:<20} {'-' * 18:<20}")
+        for row in r.feeding_table:
+            lines.append(f"  {row.weight_range:<20} {row.daily_amount:<20}")
+        lines.append("")
+
+    # Warnings
+    if r.warnings:
+        lines.append(f"OSTRZEZENIA ({len(r.warnings)}):")
+        for w in r.warnings:
+            lines.append(f"  ! {w}")
+        lines.append("")
+
+    # Complete text
+    if r.complete_text:
+        lines.append("=" * 60)
+        lines.append("PELNY TEKST ETYKIETY:")
+        lines.append("=" * 60)
+        for ln in r.complete_text.splitlines():
+            lines.append(ln)
+        lines.append("")
+
+    # Summary
+    if r.summary:
+        lines.append(f"Podsumowanie: {r.summary}")
+        lines.append("")
+
+    lines.extend([
+        "=" * 60,
+        "Tekst wygenerowany automatycznie. BULT Quality Check.",
+        "=" * 60,
+    ])
+
+    return "\n".join(lines)
+
+
+def market_check_to_text(
+    result: MarketCheckResult, filename: str,
+) -> str:
+    """Format per-market compliance check as human-readable text."""
+    lines = [
+        "=" * 60,
+        "WALIDACJA ZGODNOSCI RYNKOWEJ",
+        "BULT Quality Check",
+        "=" * 60,
+        f"Plik: {filename}",
+        "",
+    ]
+
+    if not result.performed or not result.report:
+        lines.append(
+            f"Walidacja nie powiodla sie: {result.error or 'nieznany blad'}"
+        )
+        return "\n".join(lines)
+
+    r = result.report
+
+    COMPLIANCE_LABELS = {
+        "compliant": "ZGODNE — brak problemow",
+        "issues_found": "PROBLEMY — wykryto niezgodnosci",
+        "non_compliant": "NIEZGODNE — wymagana korekta",
+    }
+    lines.extend([
+        f"Rynek docelowy: {r.target_market} ({r.target_market_code})",
+        f"Status: {COMPLIANCE_LABELS.get(r.overall_compliance, r.overall_compliance)}",
+        f"Wynik: {r.score}/100",
+        f"Bazowa zgodnosc EU 767/2009: {'TAK' if r.base_eu_compliant else 'NIE'}",
+        f"Wymagania jezykowe: {'SPELNIONE' if r.language_requirements_met else 'NIESPELNIONE'}",
+        "",
+    ])
+
+    if r.language_notes:
+        lines.append(f"Uwagi jezykowe: {r.language_notes}")
+        lines.append("")
+
+    # Market-specific requirements
+    if r.market_specific_requirements:
+        SEV_MAP = {
+            "critical": "KRYTYCZNY",
+            "warning": "OSTRZEZENIE",
+            "info": "INFO",
+        }
+        CATEGORY_MAP = {
+            "language": "JEZYK",
+            "labeling": "ETYKIETOWANIE",
+            "claims": "CLAIMY",
+            "legal": "PRAWNE",
+            "packaging": "OPAKOWANIE",
+        }
+        lines.append(
+            f"WYMAGANIA SPECYFICZNE DLA RYNKU "
+            f"({len(r.market_specific_requirements)}):"
+        )
+        lines.append("-" * 40)
+        for req in r.market_specific_requirements:
+            sev = SEV_MAP.get(req.severity, req.severity.upper())
+            cat = CATEGORY_MAP.get(req.category, req.category.upper())
+            status = "OK" if req.compliant else "NIEZGODNE"
+            lines.append(
+                f"  [{status}][{sev}] [{cat}] {req.description}"
+            )
+            if req.requirement_id:
+                lines.append(f"    ID: {req.requirement_id}")
+            if req.regulation_reference:
+                lines.append(f"    Regulacja: {req.regulation_reference}")
+            if req.finding:
+                lines.append(f"    Znaleziono: {req.finding}")
+            if not req.compliant and req.recommendation:
+                lines.append(f"    -> {req.recommendation}")
+        lines.append("")
+
+    # Additional certifications
+    if r.additional_certifications_recommended:
+        lines.append("REKOMENDOWANE CERTYFIKATY:")
+        for cert in r.additional_certifications_recommended:
+            lines.append(f"  -> {cert}")
+        lines.append("")
+
+    # Summary
+    if r.summary:
+        lines.append(f"Podsumowanie: {r.summary}")
+        lines.append("")
+
+    lines.extend([
+        "=" * 60,
+        "Raport wygenerowany automatycznie. BULT Quality Check.",
+        "=" * 60,
+    ])
+
+    return "\n".join(lines)
+
+
+def diff_to_text(
+    result: LabelDiffResult, old_filename: str, new_filename: str,
+) -> str:
+    """Format label diff as human-readable text."""
+    lines = [
+        "=" * 60,
+        "POROWNANIE WERSJI ETYKIETY",
+        "BULT Quality Check",
+        "=" * 60,
+        f"Stara wersja: {old_filename}",
+        f"Nowa wersja:  {new_filename}",
+        "",
+    ]
+
+    if not result.performed or not result.report:
+        lines.append(
+            f"Porownanie nie powiodlo sie: {result.error or 'nieznany blad'}"
+        )
+        return "\n".join(lines)
+
+    r = result.report
+    RISK_LABELS = {
+        "low": "NISKI -- zmiany kosmetyczne",
+        "medium": "SREDNI -- istotne zmiany, sprawdz",
+        "high": "WYSOKI -- wymagana weryfikacja regulacyjna",
+    }
+    lines.extend([
+        f"Poziom ryzyka: {RISK_LABELS.get(r.risk_level, r.risk_level)}",
+        f"Liczba zmian: {r.change_count}",
+        f"Ocena: {r.overall_assessment}",
+        "",
+    ])
+
+    if r.text_changes:
+        SEV_MAP = {"critical": "KRYTYCZNY", "warning": "OSTRZEZENIE", "info": "INFO"}
+        lines.append(f"ZMIANY TRESCI ({len(r.text_changes)}):")
+        lines.append("-" * 40)
+        for ch in r.text_changes:
+            sev = SEV_MAP.get(ch.severity, ch.severity.upper())
+            lines.append(f"  [{sev}] [{ch.change_type}] {ch.section}")
+            if ch.old_text:
+                lines.append(f'    Bylo: "{ch.old_text}"')
+            if ch.new_text:
+                lines.append(f'    Jest: "{ch.new_text}"')
+            if ch.regulatory_impact:
+                lines.append(f"    Wplyw: {ch.regulatory_impact}")
+        lines.append("")
+
+    if r.layout_changes:
+        lines.append(f"ZMIANY UKLADU ({len(r.layout_changes)}):")
+        for lc in r.layout_changes:
+            lines.append(f"  [{lc.severity.upper()}] {lc.description}")
+        lines.append("")
+
+    if r.new_issues_introduced:
+        lines.append(f"NOWE PROBLEMY ({len(r.new_issues_introduced)}):")
+        for ni in r.new_issues_introduced:
+            lines.append(f"  ! [{ni.severity.upper()}] {ni.description}")
+            if ni.introduced_by_change:
+                lines.append(f"    Przyczyna: {ni.introduced_by_change}")
+        lines.append("")
+
+    if r.issues_resolved:
+        lines.append(f"NAPRAWIONE PROBLEMY ({len(r.issues_resolved)}):")
+        for ir_item in r.issues_resolved:
+            lines.append(f"  + {ir_item}")
+        lines.append("")
+
+    if r.summary:
+        lines.append(f"PODSUMOWANIE: {r.summary}")
         lines.append("")
 
     lines.extend([

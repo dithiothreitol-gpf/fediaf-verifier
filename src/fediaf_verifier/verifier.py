@@ -27,11 +27,16 @@ from fediaf_verifier.models import (
     SecondaryCheck,
 )
 from fediaf_verifier.prompts import (
+    CLAIMS_CHECK_PROMPT,
     DESIGN_ANALYSIS_PROMPT,
+    EAN_EXTRACTION_PROMPT,
     EXTRACTION_PROMPT,
+    LABEL_DIFF_PROMPT,
     LABEL_STRUCTURE_PROMPT,
     LINGUISTIC_ONLY_PROMPT,
     SECONDARY_CHECK_PROMPT,
+    build_label_text_prompt,
+    build_market_check_prompt,
     build_translation_prompt,
 )
 from fediaf_verifier.providers import (
@@ -117,6 +122,51 @@ def verify_label(
     return _build_enriched_report(extraction, compliance, secondary, settings)
 
 
+def verify_label_diff(
+    old_b64: str,
+    old_media_type: str,
+    new_b64: str,
+    new_media_type: str,
+    provider: AIProvider,
+    settings: AppSettings,
+) -> "LabelDiffResult":
+    """Compare two label versions and identify changes.
+
+    Uses call_multi() to send both images in a single request.
+    """
+    from fediaf_verifier.models.label_diff import (
+        LabelDiffReport,
+        LabelDiffResult,
+    )
+
+    logger.info("Label diff comparison...")
+
+    def _call() -> LabelDiffResult:
+        raw_text = provider.call_multi(
+            prompt=LABEL_DIFF_PROMPT,
+            media_list=[
+                (old_b64, old_media_type),
+                (new_b64, new_media_type),
+            ],
+            max_tokens=settings.max_tokens_diff,
+        )
+
+        json_text = extract_json(raw_text)
+        data = json.loads(json_text)
+
+        report = LabelDiffReport.model_validate(data)
+        return LabelDiffResult(performed=True, report=report)
+
+    try:
+        return api_call_with_retry(_call)
+    except Exception as e:
+        logger.error("Label diff failed: {}", e)
+        return LabelDiffResult(
+            performed=False,
+            error=f"Blad porownania wersji: {e}",
+        )
+
+
 def verify_translation(
     target_language: str,
     target_language_name: str,
@@ -181,6 +231,225 @@ def verify_translation(
         )
 
 
+def verify_claims(
+    label_b64: str,
+    media_type: str,
+    provider: AIProvider,
+    settings: AppSettings,
+) -> "ClaimsCheckResult":
+    """Check consistency of marketing claims vs actual composition.
+
+    Single AI call: extracts claims and ingredients, validates each claim,
+    checks EU 767/2009 naming rules, grain-free consistency, and
+    detects forbidden therapeutic claims.
+    """
+    from fediaf_verifier.models.claims_check import (
+        ClaimsCheckReport,
+        ClaimsCheckResult,
+    )
+
+    logger.info("Claims vs Composition check...")
+
+    def _call() -> ClaimsCheckResult:
+        raw_text = provider.call(
+            prompt=CLAIMS_CHECK_PROMPT,
+            media_b64=label_b64,
+            media_type=media_type,
+            max_tokens=settings.max_tokens_claims,
+        )
+
+        json_text = extract_json(raw_text)
+        data = json.loads(json_text)
+
+        report = ClaimsCheckReport.model_validate(data)
+        return ClaimsCheckResult(performed=True, report=report)
+
+    try:
+        return api_call_with_retry(_call)
+    except Exception as e:
+        logger.error("Claims check failed: {}", e)
+        return ClaimsCheckResult(
+            performed=False,
+            error=f"Blad walidacji claimow: {e}",
+        )
+
+
+def generate_label_text(
+    species: str,
+    lifestage: str,
+    food_type: str,
+    ingredients: str,
+    nutrients: dict,
+    target_language: str,
+    target_language_name: str,
+    provider: AIProvider,
+    settings: AppSettings,
+    product_name: str = "",
+) -> "LabelTextResult":
+    """Generate complete label text in the target language.
+
+    Text-only AI call (no image). Uses ingredients and nutrients data
+    to produce EU 767/2009 compliant label text.
+
+    Args:
+        species: Target species (e.g. "dog", "cat").
+        lifestage: Lifestage (e.g. "adult", "puppy").
+        food_type: Food type (e.g. "dry", "wet").
+        ingredients: Ingredients list as text.
+        nutrients: Dict of analytical constituents.
+        target_language: ISO 639-1 code (e.g. "en", "de").
+        target_language_name: Full language name (e.g. "English").
+        provider: AI provider instance.
+        settings: Application settings.
+        product_name: Optional product name.
+
+    Returns:
+        LabelTextResult with generated label text.
+    """
+    from fediaf_verifier.models.label_text import (
+        LabelTextReport,
+        LabelTextResult,
+    )
+
+    logger.info(
+        "Label text generation: {} ({})...",
+        target_language_name,
+        target_language,
+    )
+
+    prompt = build_label_text_prompt(
+        species=species,
+        lifestage=lifestage,
+        food_type=food_type,
+        ingredients=ingredients,
+        nutrients=nutrients,
+        target_language=target_language,
+        target_language_name=target_language_name,
+        product_name=product_name,
+    )
+
+    def _call() -> LabelTextResult:
+        raw_text = provider.call(
+            prompt=prompt,
+            max_tokens=settings.max_tokens_label_text,
+        )
+
+        json_text = extract_json(raw_text)
+        data = json.loads(json_text)
+
+        report = LabelTextReport.model_validate(data)
+        return LabelTextResult(performed=True, report=report)
+
+    try:
+        return api_call_with_retry(_call)
+    except Exception as e:
+        logger.error("Label text generation failed: {}", e)
+        return LabelTextResult(
+            performed=False,
+            error=f"Blad generowania tekstu etykiety: {e}",
+        )
+
+
+def verify_ean(
+    label_b64: str,
+    media_type: str,
+    provider: AIProvider,
+    settings: AppSettings,
+) -> "EANCheckResult":
+    """Extract and validate barcodes/QR codes from label image.
+
+    Phase 1: AI extracts barcode numbers from image.
+    Phase 2: Python validates check digits deterministically.
+    """
+    from fediaf_verifier.ean_validator import (
+        get_country_from_prefix,
+        validate_ean13,
+        validate_ean8,
+    )
+    from fediaf_verifier.models.ean_check import (
+        EANCheckReport,
+        EANCheckResult,
+        EANResult,
+        QRCodeResult,
+    )
+
+    logger.info("EAN/barcode check...")
+
+    def _call() -> EANCheckResult:
+        raw_text = provider.call(
+            prompt=EAN_EXTRACTION_PROMPT,
+            media_b64=label_b64,
+            media_type=media_type,
+            max_tokens=settings.max_tokens_ean,
+        )
+
+        json_text = extract_json(raw_text)
+        data = json.loads(json_text)
+
+        # AI returns raw barcode data — now validate with Python
+        ai_barcodes = data.get("barcodes", [])
+        ai_qr = data.get("qr_codes", [])
+        ai_summary = data.get("summary", "")
+
+        ean_results: list[EANResult] = []
+        for bc in ai_barcodes:
+            if not isinstance(bc, dict):
+                continue
+            number = str(bc.get("barcode_number", "")).strip()
+            bc_type = str(bc.get("barcode_type", "unknown"))
+            readable = bc.get("barcode_readable", True)
+
+            # Deterministic validation
+            valid = False
+            expected = ""
+            if len(number) == 13:
+                valid, expected = validate_ean13(number)
+                if bc_type == "unknown":
+                    bc_type = "EAN-13"
+            elif len(number) == 8:
+                valid, expected = validate_ean8(number)
+                if bc_type == "unknown":
+                    bc_type = "EAN-8"
+
+            prefix, country = get_country_from_prefix(number)
+
+            ean_results.append(EANResult(
+                barcode_number=number,
+                barcode_type=bc_type,
+                barcode_readable=readable,
+                check_digit_valid=valid,
+                expected_check_digit=expected,
+                country_prefix=prefix,
+                country_name=country,
+            ))
+
+        qr_results = [
+            QRCodeResult.model_validate(qr)
+            for qr in ai_qr
+            if isinstance(qr, dict)
+        ]
+
+        all_valid = all(r.check_digit_valid for r in ean_results) if ean_results else False
+
+        report = EANCheckReport(
+            ean_results=ean_results,
+            qr_codes=qr_results,
+            barcodes_found=len(ean_results),
+            all_valid=all_valid,
+            summary=ai_summary,
+        )
+        return EANCheckResult(performed=True, report=report)
+
+    try:
+        return api_call_with_retry(_call)
+    except Exception as e:
+        logger.error("EAN check failed: {}", e)
+        return EANCheckResult(
+            performed=False,
+            error=f"Blad walidacji kodow: {e}",
+        )
+
+
 def verify_design_analysis(
     label_b64: str,
     media_type: str,
@@ -241,7 +510,7 @@ def verify_label_structure(
             prompt=LABEL_STRUCTURE_PROMPT,
             media_b64=label_b64,
             media_type=media_type,
-            max_tokens=settings.max_tokens_linguistic,
+            max_tokens=settings.max_tokens_structure,
         )
 
         json_text = extract_json(raw_text)
@@ -294,6 +563,69 @@ def verify_linguistic_only(
         logger.error("Linguistic-only check failed: {}", e)
         return LinguisticCheckResult(
             performed=False, error=f"Blad weryfikacji jezykowej: {e}"
+        )
+
+
+def verify_market_compliance(
+    label_b64: str,
+    media_type: str,
+    market_code: str,
+    provider: AIProvider,
+    settings: AppSettings,
+) -> "MarketCheckResult":
+    """Check label compliance against per-market regulatory requirements.
+
+    Single AI call that verifies the label against base EU 767/2009
+    plus country-specific rules loaded from market_rules.py.
+
+    Args:
+        label_b64: Label image/document encoded as base64.
+        media_type: MIME type of the label.
+        market_code: ISO 3166-1 alpha-2 code (e.g. "DE", "FR").
+        provider: AI provider instance.
+        settings: Application settings.
+
+    Returns:
+        MarketCheckResult with compliance report or error.
+    """
+    from fediaf_verifier.market_rules import MARKET_RULES
+    from fediaf_verifier.models.market_check import (
+        MarketCheckReport,
+        MarketCheckResult,
+    )
+
+    market_code = market_code.upper()
+    rules = MARKET_RULES.get(market_code, {})
+    market_name = rules.get("name", market_code)
+
+    logger.info("Market compliance check: {} ({})...", market_name, market_code)
+
+    prompt = build_market_check_prompt(
+        market_code=market_code,
+        market_name=market_name,
+    )
+
+    def _call() -> MarketCheckResult:
+        raw_text = provider.call(
+            prompt=prompt,
+            media_b64=label_b64,
+            media_type=media_type,
+            max_tokens=settings.max_tokens_market,
+        )
+
+        json_text = extract_json(raw_text)
+        data = json.loads(json_text)
+
+        report = MarketCheckReport.model_validate(data)
+        return MarketCheckResult(performed=True, report=report)
+
+    try:
+        return api_call_with_retry(_call)
+    except Exception as e:
+        logger.error("Market compliance check failed: {}", e)
+        return MarketCheckResult(
+            performed=False,
+            error=f"Blad walidacji rynkowej ({market_code}): {e}",
         )
 
 

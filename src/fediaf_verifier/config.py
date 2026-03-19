@@ -61,6 +61,27 @@ class AppSettings(BaseSettings):
     # Design analysis mode
     max_tokens_design: int = 12288
 
+    # Claims vs Composition check
+    max_tokens_claims: int = 12288
+
+    # Label text generation
+    max_tokens_label_text: int = 12288
+
+    # Per-market compliance check
+    max_tokens_market: int = 12288
+
+    # Label diff (version comparison)
+    max_tokens_diff: int = 16384
+
+    # EAN/barcode extraction
+    max_tokens_ean: int = 2048
+
+    # Label structure check
+    max_tokens_structure: int = 12288
+
+    # Per-market compliance check
+    max_tokens_market: int = 12288
+
     # Logging
     log_level: str = "INFO"
 

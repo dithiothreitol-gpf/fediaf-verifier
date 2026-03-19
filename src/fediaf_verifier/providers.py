@@ -71,6 +71,24 @@ class AIProvider(Protocol):
         """
         ...
 
+    def call_multi(
+        self,
+        prompt: str,
+        media_list: list[tuple[str, str]],
+        max_tokens: int = 4096,
+    ) -> str:
+        """Send prompt with multiple images/documents.
+
+        Args:
+            prompt: The text prompt.
+            media_list: List of (base64_data, mime_type) tuples.
+            max_tokens: Maximum tokens for the response.
+
+        Returns:
+            Raw text string (expected to contain JSON).
+        """
+        ...
+
 
 # -- Anthropic -----------------------------------------------------------------
 
@@ -143,6 +161,50 @@ class AnthropicProvider:
                 "Sprobuj ponownie lub zmniejsz zlozonosc etykiety."
             )
 
+        return raw
+
+    def call_multi(
+        self,
+        prompt: str,
+        media_list: list[tuple[str, str]],
+        max_tokens: int = 4096,
+    ) -> str:
+        content: list[dict] = []
+        for b64_data, mime in media_list:
+            if mime == "application/pdf":
+                content.append({
+                    "type": "document",
+                    "source": {"type": "base64", "media_type": mime, "data": b64_data},
+                })
+            else:
+                content.append({
+                    "type": "image",
+                    "source": {"type": "base64", "media_type": mime, "data": b64_data},
+                })
+        content.append({"type": "text", "text": prompt})
+
+        try:
+            response = self._client.messages.create(
+                model=self._model,
+                max_tokens=max_tokens,
+                messages=[{"role": "user", "content": content}],
+            )
+        except anthropic.RateLimitError as e:
+            raise ProviderRateLimitError(str(e)) from e
+        except anthropic.APIError as e:
+            raise ProviderAPIError(str(e)) from e
+
+        text_blocks = [b.text for b in response.content if hasattr(b, "text")]
+        if not text_blocks:
+            raise ProviderAPIError("API nie zwrocilo tekstu w odpowiedzi.")
+        raw = text_blocks[-1]
+
+        if response.stop_reason == "max_tokens":
+            from fediaf_verifier.utils import repair_truncated_json
+            repaired = repair_truncated_json(raw)
+            if repaired is not None:
+                return repaired
+            raise ProviderAPIError("Odpowiedz AI zostala ucieta.")
         return raw
 
 
@@ -225,6 +287,39 @@ class GeminiProvider:
 
         return raw
 
+    def call_multi(
+        self,
+        prompt: str,
+        media_list: list[tuple[str, str]],
+        max_tokens: int = 4096,
+    ) -> str:
+        if genai_types is None:
+            raise ConfigurationError("google-genai nie zainstalowane.")
+        parts = []
+        for b64_data, mime in media_list:
+            media_bytes = base64.b64decode(b64_data)
+            parts.append(
+                genai_types.Part.from_bytes(data=media_bytes, mime_type=mime)
+            )
+        parts.append(genai_types.Part.from_text(text=prompt))
+
+        config = genai_types.GenerateContentConfig(
+            max_output_tokens=max_tokens,
+            response_mime_type="application/json",
+        )
+        try:
+            response = self._client.models.generate_content(
+                model=self._model, contents=parts, config=config,
+            )
+        except Exception as e:
+            error_str = str(e).lower()
+            if any(kw in error_str for kw in ("429", "resource_exhausted", "quota", "rate")):
+                raise ProviderRateLimitError(str(e)) from e
+            raise ProviderAPIError(str(e)) from e
+        if not response.text:
+            raise ProviderAPIError("Gemini nie zwrocilo tekstu.")
+        return response.text
+
 
 # -- OpenAI --------------------------------------------------------------------
 
@@ -289,6 +384,38 @@ class OpenAIProvider:
                 "Sprobuj ponownie lub zmniejsz zlozonosc etykiety."
             )
 
+        return raw
+
+    def call_multi(
+        self,
+        prompt: str,
+        media_list: list[tuple[str, str]],
+        max_tokens: int = 4096,
+    ) -> str:
+        msg_content: list[dict] = []
+        for b64_data, mime in media_list:
+            image_url = f"data:{mime};base64,{b64_data}"
+            msg_content.append({
+                "type": "image_url",
+                "image_url": {"url": image_url, "detail": "high"},
+            })
+        msg_content.append({"type": "text", "text": prompt})
+
+        try:
+            response = self._client.chat.completions.create(
+                model=self._model,
+                max_tokens=max_tokens,
+                response_format={"type": "json_object"},
+                messages=[{"role": "user", "content": msg_content}],
+            )
+        except _openai.RateLimitError as e:
+            raise ProviderRateLimitError(str(e)) from e
+        except _openai.APIError as e:
+            raise ProviderAPIError(str(e)) from e
+
+        raw = response.choices[0].message.content or ""
+        if not raw:
+            raise ProviderAPIError("OpenAI nie zwrocilo tekstu.")
         return raw
 
 
