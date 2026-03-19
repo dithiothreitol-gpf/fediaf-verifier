@@ -106,7 +106,7 @@ def generate_jsx(
 
     if not annotations:
         return (
-            "// BULT Quality Check -- brak problemow z bbox do oznaczenia.\n"
+            "// BULT Quality Assurance -- brak problemow z bbox do oznaczenia.\n"
             "// Etykieta nie wymaga wizualnych adnotacji.\n"
             "alert('Brak problemow do oznaczenia.');\n"
         )
@@ -134,7 +134,7 @@ def generate_jsx(
 
     script = f"""\
 // ==========================================================
-// BULT Quality Check -- Annotacje QC
+// BULT Quality Assurance -- Annotacje QC
 // Plik zrodlowy: {escaped_filename}
 // Wygenerowano automatycznie -- NIE edytuj recznie.
 // ==========================================================
@@ -160,7 +160,7 @@ def generate_jsx(
 
     var hasSelection = doc.selection && doc.selection.length > 0;
 
-    var modeDialog = new Window('dialog', 'BULT QC - Obszar mapowania');
+    var modeDialog = new Window('dialog', 'BULT QA - Obszar mapowania');
     modeDialog.orientation = 'column';
     modeDialog.alignChildren = ['fill', 'top'];
 
@@ -355,7 +355,7 @@ def generate_jsx(
     qcLayer.locked = true;
 
     alert(
-        'BULT Quality Check\\n\\n' +
+        'BULT Quality Assurance\\n\\n' +
         'Dodano ' + annotations.length + ' adnotacji na warstwie "' + layerName + '".\\n' +
         'Obszar mapowania: ' + Math.round(tW) + ' x ' + Math.round(tH) + ' pt\\n\\n' +
         'Po przejrzeniu mozesz:\\n' +

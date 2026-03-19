@@ -51,7 +51,7 @@ def generate_text_jsx(
     """
     if not sections:
         return (
-            "// BULT Quality Check -- brak sekcji tekstowych do utworzenia.\n"
+            "// BULT Quality Assurance -- brak sekcji tekstowych do utworzenia.\n"
             "alert('Brak sekcji tekstowych do utworzenia.');\n"
         )
 
@@ -69,7 +69,7 @@ def generate_text_jsx(
 
     script = f"""\
 // ==========================================================
-// BULT Quality Check -- Tekst etykiety ({escaped_language})
+// BULT Quality Assurance -- Tekst etykiety ({escaped_language})
 // Plik zrodlowy: {escaped_filename}
 // Wygenerowano automatycznie -- NIE edytuj recznie.
 // ==========================================================
@@ -92,7 +92,7 @@ def generate_text_jsx(
     // ====== KROK 1: Wybor obszaru mapowania ======
     var hasSelection = doc.selection && doc.selection.length > 0;
 
-    var modeDialog = new Window('dialog', 'BULT QC - Obszar dla tekstu');
+    var modeDialog = new Window('dialog', 'BULT QA - Obszar dla tekstu');
     modeDialog.orientation = 'column';
     modeDialog.alignChildren = ['fill', 'top'];
 
@@ -314,7 +314,7 @@ def generate_text_jsx(
     textLayer.locked = true;
 
     alert(
-        'BULT Quality Check\\n\\n' +
+        'BULT Quality Assurance\\n\\n' +
         'Utworzono ' + sections.length + ' sekcji tekstowych na warstwie "' + layerName + '".\\n\\n' +
         'Mozesz:\\n' +
         '- Odblokowac warstwe i przesunac/zmienic rozmiar ramek\\n' +

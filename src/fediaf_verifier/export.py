@@ -238,7 +238,7 @@ def linguistic_to_text(result: LinguisticCheckResult, filename: str) -> str:
     """Format standalone linguistic check as human-readable text."""
     lines = [
         "=" * 60,
-        "WERYFIKACJA JEZYKOWA — BULT Quality Check",
+        "WERYFIKACJA JEZYKOWA — BULT Quality Assurance",
         "=" * 60,
         f"Plik: {filename}",
         "",
@@ -280,7 +280,7 @@ def linguistic_to_text(result: LinguisticCheckResult, filename: str) -> str:
     lines.extend([
         "",
         "=" * 60,
-        "Raport wygenerowany automatycznie. BULT Quality Check.",
+        "Raport wygenerowany automatycznie. BULT Quality Assurance.",
         "=" * 60,
     ])
 
@@ -294,7 +294,7 @@ def structure_to_text(
     lines = [
         "=" * 60,
         "KONTROLA STRUKTURY ETYKIETY I CZCIONKI",
-        "BULT Quality Check",
+        "BULT Quality Assurance",
         "=" * 60,
         f"Plik: {filename}",
         "",
@@ -402,7 +402,7 @@ def structure_to_text(
 
     lines.extend([
         "=" * 60,
-        "Raport wygenerowany automatycznie. BULT Quality Check.",
+        "Raport wygenerowany automatycznie. BULT Quality Assurance.",
         "=" * 60,
     ])
 
@@ -415,7 +415,7 @@ def translation_to_text(
     """Format translation as human-readable text."""
     lines = [
         "=" * 60,
-        "TLUMACZENIE ETYKIETY — BULT Quality Check",
+        "TLUMACZENIE ETYKIETY — BULT Quality Assurance",
         "=" * 60,
         f"Zrodlo: {source_label}",
         "",
@@ -460,7 +460,7 @@ def translation_to_text(
 
     lines.extend([
         "=" * 60,
-        "Raport wygenerowany automatycznie. BULT Quality Check.",
+        "Raport wygenerowany automatycznie. BULT Quality Assurance.",
         "=" * 60,
     ])
 
@@ -474,7 +474,7 @@ def design_to_text(
     lines = [
         "=" * 60,
         "ANALIZA PROJEKTU GRAFICZNEGO ETYKIETY",
-        "BULT Quality Check — raport dla R&D",
+        "BULT Quality Assurance — raport dla R&D",
         "=" * 60,
         f"Plik: {filename}",
         "",
@@ -568,7 +568,7 @@ def design_to_text(
 
     lines.extend([
         "=" * 60,
-        "Raport wygenerowany automatycznie. BULT Quality Check.",
+        "Raport wygenerowany automatycznie. BULT Quality Assurance.",
         "=" * 60,
     ])
 
@@ -580,7 +580,7 @@ def ean_to_text(result: EANCheckResult, filename: str) -> str:
     lines = [
         "=" * 60,
         "WALIDACJA KODOW KRESKOWYCH I QR",
-        "BULT Quality Check",
+        "BULT Quality Assurance",
         "=" * 60,
         f"Plik: {filename}",
         "",
@@ -635,7 +635,7 @@ def ean_to_text(result: EANCheckResult, filename: str) -> str:
 
     lines.extend([
         "=" * 60,
-        "Raport wygenerowany automatycznie. BULT Quality Check.",
+        "Raport wygenerowany automatycznie. BULT Quality Assurance.",
         "=" * 60,
     ])
 
@@ -647,7 +647,7 @@ def claims_to_text(result: ClaimsCheckResult, filename: str) -> str:
     lines = [
         "=" * 60,
         "WALIDACJA CLAIMOW VS SKLAD",
-        "BULT Quality Check",
+        "BULT Quality Assurance",
         "=" * 60,
         f"Plik: {filename}",
         "",
@@ -750,7 +750,7 @@ def claims_to_text(result: ClaimsCheckResult, filename: str) -> str:
 
     lines.extend([
         "=" * 60,
-        "Raport wygenerowany automatycznie. BULT Quality Check.",
+        "Raport wygenerowany automatycznie. BULT Quality Assurance.",
         "=" * 60,
     ])
 
@@ -762,7 +762,7 @@ def label_text_to_text(result: LabelTextResult, product_name: str = "") -> str:
     lines = [
         "=" * 60,
         "WYGENEROWANY TEKST ETYKIETY",
-        "BULT Quality Check",
+        "BULT Quality Assurance",
         "=" * 60,
     ]
     if product_name:
@@ -831,7 +831,7 @@ def label_text_to_text(result: LabelTextResult, product_name: str = "") -> str:
 
     lines.extend([
         "=" * 60,
-        "Tekst wygenerowany automatycznie. BULT Quality Check.",
+        "Tekst wygenerowany automatycznie. BULT Quality Assurance.",
         "=" * 60,
     ])
 
@@ -845,7 +845,7 @@ def market_check_to_text(
     lines = [
         "=" * 60,
         "WALIDACJA ZGODNOSCI RYNKOWEJ",
-        "BULT Quality Check",
+        "BULT Quality Assurance",
         "=" * 60,
         f"Plik: {filename}",
         "",
@@ -927,7 +927,7 @@ def market_check_to_text(
 
     lines.extend([
         "=" * 60,
-        "Raport wygenerowany automatycznie. BULT Quality Check.",
+        "Raport wygenerowany automatycznie. BULT Quality Assurance.",
         "=" * 60,
     ])
 
@@ -941,7 +941,7 @@ def diff_to_text(
     lines = [
         "=" * 60,
         "POROWNANIE WERSJI ETYKIETY",
-        "BULT Quality Check",
+        "BULT Quality Assurance",
         "=" * 60,
         f"Stara wersja: {old_filename}",
         f"Nowa wersja:  {new_filename}",
@@ -1008,7 +1008,7 @@ def diff_to_text(
 
     lines.extend([
         "=" * 60,
-        "Raport wygenerowany automatycznie. BULT Quality Check.",
+        "Raport wygenerowany automatycznie. BULT Quality Assurance.",
         "=" * 60,
     ])
 

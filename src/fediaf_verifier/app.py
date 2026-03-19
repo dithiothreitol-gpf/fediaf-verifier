@@ -1,4 +1,4 @@
-"""Streamlit application — BULT Quality Check."""
+"""Streamlit application — BULT Quality Assurance."""
 
 import sys
 from pathlib import Path
@@ -149,14 +149,14 @@ _CUSTOM_CSS = """
 
 # -- Page config -----------------------------------------------------------------------
 st.set_page_config(
-    page_title="BULT Quality Check",
+    page_title="BULT Quality Assurance",
     page_icon="\U0001f43e",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 st.markdown(_CUSTOM_CSS, unsafe_allow_html=True)
 
-st.title("\U0001f43e BULT Quality Check")
+st.title("\U0001f43e BULT Quality Assurance")
 st.caption(
     "Weryfikacja sk\u0142adu i zgodno\u015bci etykiet z wytycznymi FEDIAF "
     "oraz regulacjami EU \u2014 zanim produkt trafi do miski."
@@ -252,6 +252,7 @@ with st.sidebar:
     _GROUP_TOOLS = "\U0001f527 Narz\u0119dzia"
     _GROUP_DESIGN = "\U0001f3a8 Design"
 
+    st.header("\U0001f43e BULT QA")
     _mode_group = st.segmented_control(
         "Kategoria",
         [_GROUP_VERIFY, _GROUP_TOOLS, _GROUP_DESIGN],
@@ -960,7 +961,7 @@ Przy cz\u0119stych b\u0142\u0119dach \u2014 odczekaj minut\u0119 mi\u0119dzy ana
 """)
 
     st.divider()
-    st.caption("v1.0 \u00b7 BULT Quality Check")
+    st.caption("v1.0 \u00b7 BULT Quality Assurance")
 
 
 # -- Upload section --------------------------------------------------------------------
