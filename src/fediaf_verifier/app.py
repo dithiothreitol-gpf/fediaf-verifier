@@ -1730,12 +1730,15 @@ def _render_structure_report(
 # -- Render saved report ---------------------------------------------------------------
 if st.session_state.report is not None:
     report = st.session_state.report
-    if isinstance(report, LabelStructureCheckResult):
+    # Use class name for dispatch — robust against Streamlit hot-reload
+    # (isinstance fails when module is reloaded but session_state keeps old object)
+    _report_type = type(report).__name__
+    if _report_type == "LabelStructureCheckResult":
         _render_structure_report(
             report,
             st.session_state.report_filename,
         )
-    elif isinstance(report, LinguisticCheckResult):
+    elif _report_type == "LinguisticCheckResult":
         _render_linguistic_report(
             report,
             st.session_state.report_filename,
