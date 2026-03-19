@@ -10,14 +10,16 @@ dependencies = [
     "streamlit>=1.55.0",
     "pydantic>=2.12.5",
     "pydantic-settings>=2.13.1",
-    "Pillow>=12.1.1",
+    "Pillow>=10.0.0",
     "loguru>=0.7.0",
-    "pymupdf>=1.25.0",
 ]
 
 [project.optional-dependencies]
 docx-convert = [
     "pdf2image>=1.17.0",
+]
+annotation = [
+    "pymupdf>=1.25.0",
 ]
 
 [dependency-groups]
