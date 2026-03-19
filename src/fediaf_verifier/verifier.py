@@ -27,10 +27,12 @@ from fediaf_verifier.models import (
     SecondaryCheck,
 )
 from fediaf_verifier.prompts import (
+    DESIGN_ANALYSIS_PROMPT,
     EXTRACTION_PROMPT,
     LABEL_STRUCTURE_PROMPT,
     LINGUISTIC_ONLY_PROMPT,
     SECONDARY_CHECK_PROMPT,
+    build_translation_prompt,
 )
 from fediaf_verifier.providers import (
     AIProvider,
@@ -113,6 +115,108 @@ def verify_label(
 
     # -- PYTHON: Build final report --------------------------------------------
     return _build_enriched_report(extraction, compliance, secondary, settings)
+
+
+def verify_translation(
+    target_language: str,
+    target_language_name: str,
+    provider: AIProvider,
+    settings: AppSettings,
+    label_b64: str = "",
+    media_type: str = "",
+    source_text: str = "",
+    user_notes: str = "",
+) -> "TranslationResult":
+    """Translate label content to target language.
+
+    Supports two input modes:
+      - File upload: pass label_b64 + media_type
+      - Text input: pass source_text (max 2000 chars)
+    """
+    from fediaf_verifier.models.translation import (
+        TranslationReport,
+        TranslationResult,
+    )
+
+    logger.info(
+        "Translation: {} -> {}...",
+        "file" if label_b64 else "text",
+        target_language,
+    )
+
+    prompt = build_translation_prompt(
+        target_language=target_language,
+        target_language_name=target_language_name,
+        user_notes=user_notes,
+        source_text=source_text,
+    )
+
+    def _call() -> TranslationResult:
+        if label_b64:
+            raw_text = provider.call(
+                prompt=prompt,
+                media_b64=label_b64,
+                media_type=media_type,
+                max_tokens=settings.max_tokens_translation,
+            )
+        else:
+            raw_text = provider.call(
+                prompt=prompt,
+                max_tokens=settings.max_tokens_translation,
+            )
+
+        json_text = extract_json(raw_text)
+        data = json.loads(json_text)
+
+        report = TranslationReport.model_validate(data)
+        return TranslationResult(performed=True, report=report)
+
+    try:
+        return api_call_with_retry(_call)
+    except Exception as e:
+        logger.error("Translation failed: {}", e)
+        return TranslationResult(
+            performed=False,
+            error=f"Blad tlumaczenia: {e}",
+        )
+
+
+def verify_design_analysis(
+    label_b64: str,
+    media_type: str,
+    provider: AIProvider,
+    settings: AppSettings,
+) -> "DesignAnalysisResult":
+    """Analyze label graphic design against packaging best practices."""
+    from fediaf_verifier.models.design_analysis import (
+        DesignAnalysisReport,
+        DesignAnalysisResult,
+    )
+
+    logger.info("Design analysis...")
+
+    def _call() -> DesignAnalysisResult:
+        raw_text = provider.call(
+            prompt=DESIGN_ANALYSIS_PROMPT,
+            media_b64=label_b64,
+            media_type=media_type,
+            max_tokens=settings.max_tokens_design,
+        )
+
+        json_text = extract_json(raw_text)
+        data = json.loads(json_text)
+
+        report = DesignAnalysisReport.model_validate(data)
+        return DesignAnalysisResult(performed=True, report=report)
+
+    try:
+        return api_call_with_retry(_call)
+    except Exception as e:
+        logger.error("Design analysis failed: {}", e)
+        return DesignAnalysisResult(
+            performed=False,
+            error=f"Blad analizy graficznej: {e}",
+        )
 
 
 def verify_label_structure(

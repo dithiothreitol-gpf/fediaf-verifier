@@ -1,6 +1,13 @@
 """Pydantic v2 models for FEDIAF verifier."""
 
 from .cross_check import CrossCheckResult, Discrepancy
+from .design_analysis import (
+    CompetitiveBenchmark,
+    DesignAnalysisReport,
+    DesignAnalysisResult,
+    DesignCategoryScore,
+    DesignIssue,
+)
 from .eu_labelling import EULabellingCheck
 from .extraction import LabelExtraction, SecondaryCheck
 from .issues import Issue, Severity
@@ -18,6 +25,7 @@ from .linguistic import (
     LinguisticReport,
 )
 from .market_trends import MarketTrends, Positioning
+from .translation import TranslatedSection, TranslationReport, TranslationResult
 from .nutrients import NUTRIENT_FIELDS, NutrientsOnly, NutrientValues
 from .packaging import PackagingCheck, ProductClassification
 from .product import FoodType, Lifestage, Product, Species
@@ -30,8 +38,13 @@ from .report import (
 
 __all__ = [
     "NUTRIENT_FIELDS",
+    "CompetitiveBenchmark",
     "ComplianceStatus",
     "CrossCheckResult",
+    "DesignAnalysisReport",
+    "DesignAnalysisResult",
+    "DesignCategoryScore",
+    "DesignIssue",
     "Discrepancy",
     "EULabellingCheck",
     "EnrichedReport",
@@ -59,5 +72,8 @@ __all__ = [
     "Severity",
     "Species",
     "StructureIssue",
+    "TranslatedSection",
+    "TranslationReport",
+    "TranslationResult",
     "VerificationReport",
 ]

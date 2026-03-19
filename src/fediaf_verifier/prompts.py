@@ -185,3 +185,144 @@ Na podstawie wynikow wyszukiwania podaj JSON:
 country, summary (2-4 zdania), \
 positioning ("trendy"/"standard"/"outdated"/"niche"), \
 trend_notes (lista obserwacji)."""
+
+
+# -- Translation prompt (dynamic — target language + user notes) -----------------------
+
+
+def build_translation_prompt(
+    target_language: str,
+    target_language_name: str,
+    user_notes: str = "",
+    source_text: str = "",
+) -> str:
+    """Build translation prompt for label content.
+
+    Args:
+        target_language: ISO 639-1 code (e.g. "en", "de").
+        target_language_name: Full name (e.g. "English", "Deutsch").
+        user_notes: Optional user instructions for translation.
+        source_text: If provided, text to translate (no image).
+    """
+    text_block = ""
+    if source_text:
+        text_block = (
+            f"\n\nTEKST DO PRZETLUMACZENIA:\n"
+            f'"""\n{source_text}\n"""\n'
+        )
+
+    notes_block = ""
+    if user_notes.strip():
+        notes_block = (
+            f"\n\nDODATKOWE INSTRUKCJE OD UZYTKOWNIKA:\n{user_notes.strip()}\n"
+        )
+
+    return f"""\
+Przetlumacz tresc etykiety karmy dla zwierzat domowych \
+na jezyk: {target_language_name} ({target_language}).
+{text_block}
+ZASADY TLUMACZENIA:
+- Wykryj jezyk zrodlowy automatycznie
+- Podziel tresc na logiczne sekcje (sklad, skladniki analityczne, \
+dawkowanie, przechowywanie, producent, opis produktu, claimy, ostrzezenia)
+- Uzywaj oficjalnej terminologii regulacyjnej EU 767/2009 w jezyku docelowym:
+  * "Skladniki analityczne" = "Analytical constituents" (EN) / \
+"Analytische Bestandteile" (DE) / "Composants analytiques" (FR)
+  * "Karma pelnoporcjowa" = "Complete feed" (EN) / "Alleinfuttermittel" (DE) / \
+"Aliment complet" (FR)
+  * "Dodatki" = "Additives" (EN) / "Zusatzstoffe" (DE) / "Additifs" (FR)
+  * "Surowe bialko" = "Crude protein" (EN) / "Rohprotein" (DE) / \
+"Proteine brute" (FR)
+- Zachowaj DOKLADNIE: liczby, procenty, jednostki, nazwy marek, \
+numery partii, daty, kody
+- NIE tlumacz: nazwy wlasne marek, numery rejestracyjne, kody EAN
+- Zachowaj formatowanie i strukture oryginalnego tekstu
+- Jesli termin jest niejednoznaczny — dodaj uwage w polu "notes"
+{notes_block}
+Odpowiedz WYLACZNIE poprawnym JSON (bez markdown). Pola:
+source_language (kod ISO np. "pl"), source_language_name (np. "polski"),
+target_language ("{target_language}"), target_language_name ("{target_language_name}"),
+sections (lista: [{{section_name, original_text, translated_text, notes}}]),
+overall_notes (ogolne uwagi dotyczace tlumaczenia),
+summary (krotkie podsumowanie w jezyku docelowym)."""
+
+
+# -- Graphic design analysis prompt ----------------------------------------------------
+
+DESIGN_ANALYSIS_PROMPT = """\
+Przeanalizuj projekt etykiety karmy dla zwierzat domowych \
+jako PROFESJONALISTA od designu opakowan w branzy pet food. \
+Raport jest przeznaczony dla dzialu R&D — rekomendacje musza byc \
+KONKRETNE i WYKONALNE (np. "zwieksz font dawkowania z ~6pt do min 8pt" \
+zamiast "popraw czytelnosc").
+
+Ocen nastepujace 10 KATEGORII w skali 0-100:
+
+1. HIERARCHIA WIZUALNA (visual_hierarchy)
+Czy nazwa produktu jest dominujaca? Czy kluczowe sekcje sa latwe do znalezienia? \
+Jak wyglada naturalny flow czytania?
+
+2. CZYTELNOSC (readability)
+Rozmiary fontow, kontrast tekst-tlo, interlinia, czytelnosc z odleglosci 30cm. \
+Czy tekst regulacyjny (sklad, tabela) jest czytelny?
+
+3. UZYCIE KOLORU (color_usage)
+Spojnosc palety z marka, psychologia koloru (apetycznosc, zaufanie), \
+wyroznienie na polce wsrod konkurencji.
+
+4. KOMPOZYCJA I UKLAD (layout_composition)
+Balans elementow, whitespace, gestosc informacji, siatka/grid.
+
+5. ELEMENTY OBOWIAZKOWE (regulatory_placement)
+Czy tabela skladnikow analitycznych, lista skladnikow, dane producenta, \
+masa netto, gatunek, partia/data sa wlasciwie umieszczone i czytelne?
+
+6. WPLYW POLKOWY (shelf_impact)
+Rozpoznawalnosc z dystansu 1-2m, wyroznienie na tle konkurencji, \
+facing design (widok frontalny).
+
+7. FOTOGRAFIA I GRAFIKA (imagery)
+Jakosc zdjec/ilustracji, apetycznosc, trafnosc (czy pasuje do produktu), \
+spojnosc stylu graficznego.
+
+8. GRUPA DOCELOWA (target_audience)
+Sygnaly premium vs economy vs standard, dopasowanie do pozycjonowania produktu, \
+czy design przemawia do wlascicieli zwierzat w docelowym segmencie.
+
+9. SYGNALY EKOLOGICZNE (sustainability)
+Ikony recyklingu, komunikacja ekologiczna, materialy opakowania, \
+zielone claimy — obecnosc i wiarygodnosc.
+
+10. UKLAD WIELOJEZYCZNY (multilanguage_layout)
+Organizacja tresci wielojezycznych, czytelnosc per jezyk, \
+hierarchia jezykow, separatory/markery.
+
+DLA KAZDEJ KATEGORII podaj:
+- score (0-100)
+- findings (lista obserwacji — co widzisz)
+- recommendations (lista konkretnych rekomendacji)
+
+DODATKOWO podaj:
+- Konkretne PROBLEMY (issues) z severity: critical/major/minor/suggestion
+- MOCNE STRONY (strengths) — co etykieta robi dobrze
+- BENCHMARK KONKURENCYJNY — jak etykieta wypada na tle standardow branzy pet food
+- TRENDY BRANZOWE — ktore aktualne trendy sa widoczne / ktorych brakuje
+- PODSUMOWANIE DLA R&D — 3-5 najwazniejszych akcji do podjecia
+
+Rubryk oceny:
+- 80-100: Doskonale, wzorcowe w branzy
+- 60-79: Dobre, spelnia standardy
+- 40-59: Wymaga poprawy
+- 0-39: Powazne problemy
+
+Odpowiedz WYLACZNIE poprawnym JSON (bez markdown). Pola:
+overall_score (0-100), overall_assessment (1-2 zdania),
+category_scores (lista: [{{category, category_name, score, findings (lista), \
+recommendations (lista)}}]),
+issues (lista: [{{category, description, severity \
+("critical"/"major"/"minor"/"suggestion"), location, recommendation}}]),
+strengths (lista stringow),
+competitive_benchmarks (lista: [{{aspect, current_level, industry_standard, \
+suggestion}}]),
+trend_alignment (lista stringow),
+actionable_summary (podsumowanie dla R&D — konkretne akcje)."""

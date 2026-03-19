@@ -55,6 +55,12 @@ class AppSettings(BaseSettings):
     # Linguistic check (cross-check + linguistic combined — needs headroom)
     max_tokens_linguistic: int = 8192
 
+    # Translation mode
+    max_tokens_translation: int = 8192
+
+    # Design analysis mode
+    max_tokens_design: int = 12288
+
     # Logging
     log_level: str = "INFO"
 

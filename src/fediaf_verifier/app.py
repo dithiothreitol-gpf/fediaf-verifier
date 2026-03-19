@@ -13,7 +13,13 @@ from fediaf_verifier.exceptions import (
     ConversionError,
     FediafVerifierError,
 )
-from fediaf_verifier.export import structure_to_text, to_json, to_text
+from fediaf_verifier.export import (
+    design_to_text,
+    structure_to_text,
+    to_json,
+    to_text,
+    translation_to_text,
+)
 from fediaf_verifier.models import (
     EnrichedReport,
     ExtractionConfidence,
@@ -23,9 +29,11 @@ from fediaf_verifier.models import (
 from fediaf_verifier.providers import AIProvider
 from fediaf_verifier.verifier import (
     create_providers,
+    verify_design_analysis,
     verify_label,
     verify_label_structure,
     verify_linguistic_only,
+    verify_translation,
 )
 
 # -- Logging setup ---------------------------------------------------------------------
@@ -214,29 +222,99 @@ MARKETS = [
     "Hiszpania",
 ]
 
-_MODE_FULL = "Pe\u0142na weryfikacja"
-_MODE_LINGUISTIC = "Tylko weryfikacja j\u0119zykowa"
-_MODE_STRUCTURE = "Kontrola struktury i czcionki"
+_MODE_FULL = "\U0001f50d Pe\u0142na weryfikacja"
+_MODE_LINGUISTIC = "\U0001f4dd Weryfikacja j\u0119zykowa"
+_MODE_STRUCTURE = "\U0001f524 Kontrola struktury i czcionki"
+_MODE_TRANSLATION = "\U0001f310 T\u0142umaczenie etykiety"
+_MODE_DESIGN = "\U0001f3a8 Analiza projektu graficznego"
+
+_TRANSLATION_LANGUAGES = {
+    "en": "English",
+    "de": "Deutsch",
+    "fr": "Fran\u00e7ais",
+    "cs": "\u010ce\u0161tina",
+    "hu": "Magyar",
+    "ro": "Rom\u00e2n\u0103",
+    "it": "Italiano",
+    "es": "Espa\u00f1ol",
+    "nl": "Nederlands",
+    "sk": "Sloven\u010dina",
+    "bg": "\u0411\u044a\u043b\u0433\u0430\u0440\u0441\u043a\u0438",
+    "hr": "Hrvatski",
+    "pt": "Portugu\u00eas",
+    "pl": "Polski",
+}
 
 with st.sidebar:
-    st.header("Parametry weryfikacji")
+    # CSS: visual separator between verification group (items 1-3) and tools (4-5)
+    st.markdown("""
+<style>
+    /* Separator line between 3rd and 4th radio option */
+    section[data-testid="stSidebar"] div[role="radiogroup"] > label:nth-child(4) {
+        border-top: 1px solid rgba(128,128,128,0.2);
+        margin-top: 0.6rem;
+        padding-top: 0.6rem;
+    }
+    /* Compact radio spacing */
+    section[data-testid="stSidebar"] div[role="radiogroup"] > label {
+        padding: 0.25rem 0;
+    }
+</style>
+""", unsafe_allow_html=True)
 
-    verification_mode = st.selectbox(
-        "Tryb weryfikacji",
-        [_MODE_FULL, _MODE_LINGUISTIC, _MODE_STRUCTURE],
-        help=(
-            "Pe\u0142na \u2014 analiza sk\u0142adu, FEDIAF, EU, opakowania + j\u0119zyk.\n"
-            "J\u0119zykowa \u2014 szybka kontrola ortografii i gramatyki.\n"
-            "Struktura \u2014 kontrola sekcji j\u0119zykowych, marker\u00f3w "
-            "i kompletno\u015bci znak\u00f3w w czcionce."
-        ),
+    verification_mode = st.radio(
+        "Tryb pracy",
+        [
+            _MODE_FULL,
+            _MODE_LINGUISTIC,
+            _MODE_STRUCTURE,
+            _MODE_TRANSLATION,
+            _MODE_DESIGN,
+        ],
+        captions=[
+            "Sk\u0142ad, FEDIAF, EU, opakowanie, j\u0119zyk",
+            "Ortografia, gramatyka, diakrytyki",
+            "Sekcje j\u0119zykowe, markery, czcionka",
+            "T\u0142umaczenie tre\u015bci na wybrany j\u0119zyk",
+            "Ocena designu z rekomendacjami dla R&D",
+        ],
     )
+
     is_linguistic_only = verification_mode == _MODE_LINGUISTIC
     is_structure_check = verification_mode == _MODE_STRUCTURE
+    is_translation = verification_mode == _MODE_TRANSLATION
+    is_design_analysis = verification_mode == _MODE_DESIGN
 
-    if is_linguistic_only or is_structure_check:
-        selected_market = None
-    else:
+    # -- Mode-specific options --
+    st.divider()
+
+    selected_market = None
+    _translation_target_lang = ""
+    _translation_target_name = ""
+    _translation_notes = ""
+
+    if is_translation:
+        st.subheader("Opcje t\u0142umaczenia")
+        _tl_display = [
+            f"{name} ({code})"
+            for code, name in _TRANSLATION_LANGUAGES.items()
+        ]
+        _tl_selection = st.selectbox("J\u0119zyk docelowy", _tl_display)
+        _tl_idx = _tl_display.index(_tl_selection)
+        _tl_codes = list(_TRANSLATION_LANGUAGES.keys())
+        _translation_target_lang = _tl_codes[_tl_idx]
+        _translation_target_name = list(_TRANSLATION_LANGUAGES.values())[_tl_idx]
+
+        _translation_notes = st.text_area(
+            "Dodatkowe uwagi",
+            max_chars=500,
+            height=80,
+            placeholder="np. u\u017cywaj terminologii weterynaryjnej, "
+            "zachowaj styl formalny...",
+        )
+
+    elif not is_linguistic_only and not is_structure_check and not is_design_analysis:
+        # Full verification mode — market selector
         market_selection = st.selectbox(
             "Rynek docelowy",
             options=MARKETS,
@@ -249,22 +327,7 @@ with st.sidebar:
             None if market_selection == MARKETS[0] else market_selection
         )
 
-    if is_structure_check:
-        st.caption(
-            "Tryb struktury \u2014 kontrola sekcji j\u0119zykowych, "
-            "marker\u00f3w i kompletno\u015bci znak\u00f3w w czcionce."
-        )
-    elif is_linguistic_only:
-        st.caption(
-            "Tryb j\u0119zykowy \u2014 szybka kontrola "
-            "ortografii, gramatyki i diakrytyk\u00f3w."
-        )
-    elif selected_market:
-        st.info(f"Rynek docelowy: **{selected_market}**")
-    else:
-        st.caption("Weryfikacja obejmie wy\u0142\u0105cznie FEDIAF i regulacje EU.")
-
-    if not is_linguistic_only and not is_structure_check:
+    if not is_linguistic_only and not is_structure_check and not is_translation and not is_design_analysis:
         st.divider()
 
         pdf_path = settings.fediaf_pdf_path
@@ -283,7 +346,24 @@ with st.sidebar:
 
     # -- "Jak zacz\u0105\u0107?" — depends on mode --
     with st.expander("Jak zacz\u0105\u0107?"):
-        if is_structure_check:
+        if is_translation:
+            st.markdown("""\
+1. **Wgraj etykiet\u0119** (JPG/PNG/PDF) lub **wklej tekst** (max 2000 znak\u00f3w)
+2. **Wybierz j\u0119zyk docelowy** w panelu bocznym
+3. Opcjonalnie dodaj **uwagi** (np. "u\u017cywaj terminologii weterynaryjnej")
+4. **Kliknij "Przet\u0142umacz"** \u2014 analiza trwa 20\u201340 sekund
+5. **Przejrzyj t\u0142umaczenie** \u2014 orygina\u0142 i t\u0142umaczenie obok siebie
+6. **Pobierz raport TXT** \u2014 do przekazania grafikowi lub korektorowi
+""")
+        elif is_design_analysis:
+            st.markdown("""\
+1. **Wgraj etykiet\u0119** \u2014 JPG, PNG lub PDF (najlepiej gotowy projekt)
+2. **Kliknij "Analizuj design"** \u2014 analiza trwa 30\u201360 sekund
+3. **Przejrzyj raport** \u2014 10 kategorii z ocenami, problemy, rekomendacje
+4. **Pobierz raport** \u2014 TXT (do wydruku) lub JSON (do systemu)
+5. **Przekaz do R&D** \u2014 sekcja "Podsumowanie dla R&D" z konkretnymi akcjami
+""")
+        elif is_structure_check:
             st.markdown("""\
 1. **Wgraj etykiet\u0119** \u2014 JPG, PNG lub PDF (eksport z Illustratora)
 2. **Kliknij "Sprawd\u017a struktur\u0119"** \u2014 analiza trwa 15\u201330 sekund
@@ -321,7 +401,21 @@ prostok\u0105tami (dost\u0119pna dla plik\u00f3w PDF i obraz\u00f3w)
 | **PDF** | Specyfikacja lub eksport z Illustratora |
 | **DOCX** | Dokument Word (wymaga LibreOffice do konwersji) |
 """)
-        if is_structure_check:
+        if is_translation:
+            st.markdown("""\
+**T\u0142umaczenie \u2014 dwa tryby wej\u015bcia:**
+- **Plik** \u2014 wgraj obraz lub PDF etykiety
+- **Tekst** \u2014 wklej lub wpisz tre\u015b\u0107 (max 2000 znak\u00f3w)
+- Je\u015bli wgrasz plik i wpiszesz tekst \u2014 plik ma priorytet
+""")
+        elif is_design_analysis:
+            st.markdown("""\
+**Wskaz\u00f3wki:**
+- Wgraj gotowy projekt etykiety (nie szkic)
+- Im wy\u017csza jako\u015b\u0107 obrazu, tym dok\u0142adniejsza analiza
+- Najlepiej: eksport z Illustratora jako PDF lub PNG
+""")
+        elif is_structure_check:
             st.markdown("""\
 **Wskaz\u00f3wki dla kontroli struktury:**
 - Eksportuj z Illustratora jako PDF z w\u0142\u0105czon\u0105 \
@@ -347,7 +441,50 @@ w Illustratorze zamiast eksportu
 """)
 
     # -- Sekcje raportu — mode-specific --
-    if is_structure_check:
+    if is_translation:
+        with st.expander("Co oznaczaj\u0105 sekcje raportu?"):
+            st.markdown("""\
+**Sekcje t\u0142umaczenia:**
+Ka\u017cda sekcja etykiety (sk\u0142ad, sk\u0142adniki analityczne, dawkowanie, \
+producent, claimy, ostrze\u017cenia) jest wy\u015bwietlana obok siebie: \
+orygina\u0142 | t\u0142umaczenie.
+
+**Uwagi t\u0142umacza:**
+Pod ka\u017cd\u0105 sekcj\u0105 mog\u0105 pojawi\u0107 si\u0119 uwagi \u2014 np. \
+alternatywne t\u0142umaczenia, niejednoznaczno\u015bci terminologiczne, \
+r\u00f3\u017cnice mi\u0119dzy rynkami.
+
+**Terminologia EU 767/2009:**
+System u\u017cywa oficjalnych t\u0142umacze\u0144 termin\u00f3w regulacyjnych \
+(np. "sk\u0142adniki analityczne" = "analytical constituents").
+""")
+    elif is_design_analysis:
+        with st.expander("Co oznaczaj\u0105 sekcje raportu?"):
+            st.markdown("""\
+**Ocena og\u00f3lna (0\u2013100):**
+- **80\u2013100** \u2014 doskona\u0142y design, wzorcowy w bran\u017cy
+- **60\u201379** \u2014 dobry, spe\u0142nia standardy
+- **40\u201359** \u2014 wymaga poprawy
+- **0\u201339** \u2014 powa\u017cne problemy
+
+**10 kategorii analizy:**
+Hierarchia wizualna, czytelno\u015b\u0107, u\u017cycie koloru, \
+kompozycja, elementy obowi\u0105zkowe, wp\u0142yw p\u00f3\u0142kowy, \
+fotografia, grupa docelowa, ekologia, uk\u0142ad wieloj\u0119zyczny.
+
+**Problemy** \u2014 z priorytetem:
+- \U0001f534 Krytyczny \u2014 wymaga natychmiastowej korekty
+- \U0001f7e0 Istotny \u2014 wp\u0142ywa na jako\u015b\u0107
+- \U0001f7e1 Drobny \u2014 do rozwa\u017cenia
+- \U0001f535 Sugestia \u2014 opcjonalna poprawa
+
+**Benchmark konkurencyjny:**
+Por\u00f3wnanie z praktykami bran\u017cy pet food.
+
+**Podsumowanie R&D:**
+3\u20135 najwa\u017cniejszych akcji do podj\u0119cia.
+""")
+    elif is_structure_check:
         with st.expander("Co oznaczaj\u0105 sekcje raportu?"):
             st.markdown("""\
 **Status og\u00f3lny**
@@ -441,7 +578,43 @@ oznaczenia recyklingu, kody kreskowe, nr zak\u0142adu, GMO i wi\u0119cej.
 
     # -- Jak dzia\u0142a system — mode-specific --
     with st.expander("Jak dzia\u0142a system?"):
-        if is_structure_check:
+        if is_translation:
+            st.markdown("""\
+**T\u0142umaczenie \u2014 1 wywo\u0142anie AI:**
+
+System przyjmuje obraz etykiety lub wklejony tekst, \
+automatycznie wykrywa j\u0119zyk \u017ar\u00f3d\u0142owy, dzieli tre\u015b\u0107 \
+na logiczne sekcje i t\u0142umaczy na wybrany j\u0119zyk.
+
+**Terminologia bran\u017cowa:**
+System u\u017cywa oficjalnych t\u0142umacze\u0144 termin\u00f3w regulacyjnych \
+EU 767/2009 (np. "sk\u0142adniki analityczne", "karma pe\u0142noporcjowa").
+
+**Uwagi u\u017cytkownika:**
+Dodatkowe instrukcje (np. styl, terminologia) s\u0105 \
+uwzgl\u0119dniane przez AI przy t\u0142umaczeniu.
+
+*Narz\u0119dzie wspomagaj\u0105ce \u2014 nie zast\u0119puje profesjonalnego t\u0142umacza.*
+""")
+        elif is_design_analysis:
+            st.markdown("""\
+**Analiza graficzna \u2014 1 wywo\u0142anie AI:**
+
+System analizuje projekt etykiety jako profesjonalista \
+od designu opakowan w bran\u017cy pet food.
+
+**10 kategorii oceny:**
+Ka\u017cda kategoria oceniana 0\u2013100 z konkretnymi obserwacjami \
+i rekomendacjami. Rekomendacje s\u0105 precyzyjne \
+(np. "zwi\u0119ksz font z 6pt do 8pt").
+
+**Dla R&D:**
+Raport zawiera benchmark konkurencyjny, analiz\u0119 trend\u00f3w \
+i podsumowanie wykonawcze z 3\u20135 najwa\u017cniejszymi akcjami.
+
+*Oceny s\u0105 subiektywn\u0105 analiz\u0105 AI, nie audytem certyfikacyjnym.*
+""")
+        elif is_structure_check:
             st.markdown("""\
 **Kontrola struktury i czcionki \u2014 1 wywo\u0142anie AI:**
 
@@ -515,7 +688,37 @@ twardych regu\u0142, nie interpretacji AI.
 """)
 
     # -- Kiedy konsultowa\u0107 z ekspertem — mode-specific --
-    if is_structure_check:
+    if is_translation:
+        with st.expander("Kiedy konsultowa\u0107 z t\u0142umaczem?"):
+            st.markdown("""\
+**Zawsze zweryfikuj z t\u0142umaczem gdy:**
+- Etykieta docelowa na nowy rynek eksportowy
+- Terminologia bran\u017cowa specyficzna dla danego kraju
+- T\u0142umaczenie claim\u00f3w funkcjonalnych (np. "skin & coat")
+- Tekst regulacyjny (PARNUT, claimy zdrowotne)
+
+**T\u0142umaczenie AI to propozycja:**
+Dobre jako punkt wyj\u015bcia, ale t\u0142umacz powinien \
+zweryfikowa\u0107 poprawno\u015b\u0107 terminologiczn\u0105 i stylistyczn\u0105 \
+w kontek\u015bcie rynku docelowego.
+""")
+    elif is_design_analysis:
+        with st.expander("Jak wykorzysta\u0107 raport w R&D?"):
+            st.markdown("""\
+**Priorytety dzia\u0142a\u0144:**
+1. Problemy krytyczne i istotne \u2014 natychmiast
+2. Rekomendacje z "Podsumowania R&D" \u2014 w kolejnej iteracji
+3. Sugestie i drobne \u2014 przy okazji redesignu
+
+**Benchmark konkurencyjny:**
+U\u017cyj do argumentacji zmian przed zarz\u0105dem \u2014 \
+"konkurencja robi X, my powinni\u015bmy Y".
+
+**Oceny s\u0105 orientacyjne:**
+AI analizuje obraz, nie zna kontekstu marki, bud\u017cetu \
+ani strategii. Traktuj jako input, nie werdykt.
+""")
+    elif is_structure_check:
         with st.expander("Kiedy konsultowa\u0107 z grafikiem?"):
             st.markdown("""\
 **Natychmiast przekazuj do korekty gdy:**
@@ -571,7 +774,30 @@ System automatycznie oznacza raport jako **wymagaj\u0105cy przegl\u0105du** gdy:
 
     # -- S\u0142ownik — mode-specific --
     with st.expander("S\u0142ownik poj\u0119\u0107"):
-        if is_structure_check:
+        if is_translation:
+            st.markdown("""\
+| Poj\u0119cie | Znaczenie |
+|---------|-----------|
+| **EU 767/2009** | Regulacja UE dot. etykietowania karm \u2014 \u017ar\u00f3d\u0142o terminologii |
+| **Sk\u0142adniki analityczne** | Analytical constituents (EN) / Analytische Bestandteile (DE) |
+| **Karma pe\u0142noporcjowa** | Complete feed (EN) / Alleinfuttermittel (DE) |
+| **Dodatki** | Additives (EN) / Zusatzstoffe (DE) |
+| **J\u0119zyk \u017ar\u00f3d\u0142owy** | Automatycznie wykryty j\u0119zyk etykiety |
+| **J\u0119zyk docelowy** | Wybrany j\u0119zyk t\u0142umaczenia |
+""")
+        elif is_design_analysis:
+            st.markdown("""\
+| Poj\u0119cie | Znaczenie |
+|---------|-----------|
+| **Hierarchia wizualna** | Porz\u0105dek wa\u017cno\u015bci element\u00f3w na etykiecie |
+| **Shelf impact** | Jak etykieta wygl\u0105da na p\u00f3\u0142ce sklepowej z dystansu |
+| **Facing** | Widok frontalny opakowania na p\u00f3\u0142ce |
+| **Appetite appeal** | Apetyczno\u015b\u0107 \u2014 czy zdj\u0119cie/grafika budzi ch\u0119\u0107 zakupu |
+| **Benchmark** | Por\u00f3wnanie z praktykami konkurencji |
+| **Whitespace** | Pusta przestrze\u0144 \u2014 nie oznacza "zmarnowane miejsce" |
+| **R&D** | Dzia\u0142 bada\u0144 i rozwoju (odbiorca raportu) |
+""")
+        elif is_structure_check:
             st.markdown("""\
 | Poj\u0119cie | Znaczenie |
 |---------|-----------|
@@ -612,7 +838,44 @@ System automatycznie oznacza raport jako **wymagaj\u0105cy przegl\u0105du** gdy:
 
     # -- FAQ — shared + mode-specific --
     with st.expander("FAQ"):
-        if is_structure_check:
+        if is_translation:
+            st.markdown("""\
+**Ile trwa t\u0142umaczenie?**
+20\u201340 sekund.
+
+**Czy mo\u017cna t\u0142umaczy\u0107 z dowolnego j\u0119zyka?**
+Tak. System automatycznie wykrywa j\u0119zyk \u017ar\u00f3d\u0142owy.
+
+**Czy t\u0142umaczenie uwzgl\u0119dnia terminologi\u0119 bran\u017cow\u0105?**
+Tak. System u\u017cywa oficjalnych t\u0142umacze\u0144 termin\u00f3w \
+z EU 767/2009 (np. "crude protein", "Rohprotein").
+
+**Czy mog\u0119 wklei\u0107 tekst zamiast wgrywa\u0107 plik?**
+Tak. Pod polem uploadu jest pole tekstowe (max 2000 znak\u00f3w). \
+Je\u015bli wgrasz plik i wpiszesz tekst \u2014 plik ma priorytet.
+
+**Czy t\u0142umaczenie zast\u0119puje t\u0142umacza?**
+Nie. To punkt wyj\u015bcia do weryfikacji przez profesjonalnego \
+t\u0142umacza, szczeg\u00f3lnie dla nowych rynk\u00f3w.
+""")
+        elif is_design_analysis:
+            st.markdown("""\
+**Ile trwa analiza?**
+30\u201360 sekund.
+
+**Czy oceny s\u0105 obiektywne?**
+Nie. To subiektywna analiza AI oparta na praktykach bran\u017cy \
+pet food. Traktuj jako profesjonaln\u0105 opini\u0119, nie audyt.
+
+**Czy system por\u00f3wnuje z konkretnymi konkurentami?**
+Nie z nazwy. Por\u00f3wnuje z og\u00f3lnymi standardami \
+i trendami w bran\u017cy opakowan pet food.
+
+**Dla kogo jest raport?**
+G\u0142\u00f3wnie dla R&D i dzia\u0142u marketingu. \
+Sekcja "Podsumowanie dla R&D" zawiera konkretne akcje.
+""")
+        elif is_structure_check:
             st.markdown("""\
 **Ile trwa analiza?**
 15\u201330 sekund.
@@ -760,14 +1023,23 @@ if uploaded:
                 f'<div style="background:var(--secondary-background-color);'
                 f"border-radius:10px;padding:2rem;text-align:center;\">"
                 f'<span style="font-size:2.5rem;">\U0001f4c4</span><br>'
-                f'<span style="opacity:0.7;font-size:0.85rem;">{uploaded.name}</span>'
+                f'<span style="opacity:0.7;font-size:0.85rem;">'
+                f"{__import__('html').escape(uploaded.name)}</span>"
                 f"</div>",
                 unsafe_allow_html=True,
             )
     with col_info:
         st.markdown(f"**Plik:** {uploaded.name}")
         st.markdown(f"**Rozmiar:** {uploaded.size / 1024:.1f} KB")
-        if is_structure_check:
+        if is_translation:
+            st.markdown(
+                f"**Tryb:** t\u0142umaczenie na {_translation_target_name}"
+            )
+            st.caption("T\u0142umaczenie \u2014 ok. 20\u201340 sekund.")
+        elif is_design_analysis:
+            st.markdown("**Tryb:** analiza projektu graficznego")
+            st.caption("Analiza designu \u2014 ok. 30\u201360 sekund.")
+        elif is_structure_check:
             st.markdown("**Tryb:** kontrola struktury i czcionki")
             st.caption(
                 "Analiza sekcji j\u0119zykowych i kompletno\u015bci "
@@ -899,6 +1171,118 @@ def _run_structure_check(uploaded_file) -> None:
     st.session_state.structure_media_type = media_type
 
 
+# -- Translation: text input area (alternative to file upload) ---------------------
+_translation_source_text = ""
+if is_translation:
+    _translation_source_text = st.text_area(
+        "Lub wklej/wpisz tekst etykiety",
+        max_chars=2000,
+        height=150,
+        placeholder="Wklej tre\u015b\u0107 etykiety do przet\u0142umaczenia (max 2000 znak\u00f3w)...",
+        help="Alternatywa dla uploadu pliku. Mo\u017cesz wklei\u0107 tekst "
+        "zamiast wgrywa\u0107 obraz/PDF.",
+    )
+    if uploaded and _translation_source_text:
+        st.warning(
+            "Wgrano plik i wpisano tekst \u2014 plik ma priorytet, "
+            "tekst zostanie zignorowany."
+        )
+
+
+# -- Run functions for new modes ---------------------------------------------------
+def _run_translation(
+    uploaded_file, source_text: str, target_lang: str,
+    target_name: str, user_notes: str,
+) -> None:
+    with st.spinner(
+        f"T\u0142umacz\u0119 na {target_name}... (ok. 20\u201340 sekund)"
+    ):
+        try:
+            label_b64 = ""
+            media_type = ""
+            if uploaded_file is not None:
+                uploaded_file.seek(0)
+                label_b64, media_type = file_to_base64(
+                    uploaded_file.read(), uploaded_file.name
+                )
+            result = verify_translation(
+                target_language=target_lang,
+                target_language_name=target_name,
+                provider=secondary_provider,
+                settings=settings,
+                label_b64=label_b64,
+                media_type=media_type,
+                source_text=source_text if not label_b64 else "",
+                user_notes=user_notes,
+            )
+        except ConversionError as e:
+            st.error(f"**B\u0142\u0105d pliku:** {e}")
+            return
+        except FediafVerifierError as e:
+            st.error(f"**B\u0142\u0105d API:** {e}")
+            return
+        except Exception as e:
+            st.error(f"**Nieoczekiwany b\u0142\u0105d:** {e}")
+            logger.exception("Unexpected error during translation")
+            return
+
+    st.session_state.report = result
+    st.session_state.report_filename = (
+        uploaded_file.name if uploaded_file else "tekst_wklejony"
+    )
+    st.session_state.report_market = None
+
+
+def _run_design_analysis(uploaded_file) -> None:
+    with st.spinner(
+        "Analizuj\u0119 projekt graficzny... (ok. 30\u201360 sekund)"
+    ):
+        try:
+            uploaded_file.seek(0)
+            label_b64, media_type = file_to_base64(
+                uploaded_file.read(), uploaded_file.name
+            )
+            result = verify_design_analysis(
+                label_b64=label_b64,
+                media_type=media_type,
+                provider=secondary_provider,
+                settings=settings,
+            )
+        except ConversionError as e:
+            st.error(f"**B\u0142\u0105d pliku:** {e}")
+            return
+        except FediafVerifierError as e:
+            st.error(f"**B\u0142\u0105d API:** {e}")
+            return
+        except Exception as e:
+            st.error(f"**Nieoczekiwany b\u0142\u0105d:** {e}")
+            logger.exception("Unexpected error during design analysis")
+            return
+
+    st.session_state.report = result
+    st.session_state.report_filename = uploaded_file.name
+    st.session_state.report_market = None
+
+
+# -- Buttons -----------------------------------------------------------------------
+_has_translation_input = uploaded or bool(_translation_source_text.strip())
+
+if is_translation and _has_translation_input and st.button(
+    "Przet\u0142umacz", type="primary", use_container_width=True
+):
+    _run_translation(
+        uploaded if uploaded else None,
+        _translation_source_text,
+        _translation_target_lang,
+        _translation_target_name,
+        _translation_notes,
+    )
+
+if uploaded and is_design_analysis and st.button(
+    "Analizuj design", type="primary", use_container_width=True
+):
+    _run_design_analysis(uploaded)
+
 if uploaded and is_structure_check and st.button(
     "Sprawd\u017a struktur\u0119", type="primary", use_container_width=True
 ):
@@ -909,7 +1293,7 @@ if uploaded and is_linguistic_only and st.button(
 ):
     _run_linguistic_only(uploaded)
 
-if uploaded and not is_linguistic_only and not is_structure_check and st.button(
+if uploaded and not is_linguistic_only and not is_structure_check and not is_translation and not is_design_analysis and st.button(
     "Sprawd\u017a etykiet\u0119", type="primary", use_container_width=True
 ):
     _run_verification(uploaded, selected_market)
@@ -1070,11 +1454,14 @@ def _render_report(
                     type_label = ISSUE_LABELS_PL.get(
                         li.issue_type, li.issue_type
                     )
+                    from html import escape as _esc
+
                     st.markdown(
                         f"{icon} **[{type_label}]** "
-                        f'~~{li.original}~~ \u2192 **{li.suggestion}**  \n'
+                        f'<s>{_esc(li.original)}</s> \u2192 '
+                        f"<strong>{_esc(li.suggestion)}</strong>  \n"
                         f'<span style="opacity:0.6;font-size:0.85rem;">'
-                        f"{li.explanation}</span>",
+                        f"{_esc(li.explanation)}</span>",
                         unsafe_allow_html=True,
                     )
             else:
@@ -1442,14 +1829,17 @@ def _render_linguistic_report(
             "terminology": "Terminologia",
         }
         st.subheader("Znalezione problemy")
+        from html import escape as _esc
+
         for li in lr.issues:
             icon = _ISSUE_ICONS.get(li.issue_type, "\u2022")
             label = _ISSUE_LABELS.get(li.issue_type, li.issue_type)
             st.markdown(
                 f"{icon} **[{label}]** "
-                f"~~{li.original}~~ \u2192 **{li.suggestion}**  \n"
+                f'<s>{_esc(li.original)}</s> \u2192 '
+                f"<strong>{_esc(li.suggestion)}</strong>  \n"
                 f'<span style="opacity:0.6;font-size:0.85rem;">'
-                f"{li.explanation}</span>",
+                f"{_esc(li.explanation)}</span>",
                 unsafe_allow_html=True,
             )
     else:
@@ -1727,13 +2117,242 @@ def _render_structure_report(
             )
 
 
+# -- Render translation report ---------------------------------------------------------
+def _render_translation_report(result, filename: str) -> None:
+    st.divider()
+
+    if not result.performed or not result.report:
+        st.error(
+            f"**T\u0142umaczenie nie powiod\u0142o si\u0119.**\n\n"
+            f"{result.error or 'Nieznany b\u0142\u0105d.'}"
+        )
+        return
+
+    r = result.report
+    st.success(
+        f"\u2705 T\u0142umaczenie uko\u0144czone: "
+        f"{r.source_language_name} \u2192 {r.target_language_name}"
+    )
+
+    mc1, mc2, mc3 = st.columns(3)
+    mc1.metric(
+        "J\u0119zyk \u017ar\u00f3d\u0142owy",
+        f"{r.source_language_name} ({r.source_language})",
+    )
+    mc2.metric(
+        "J\u0119zyk docelowy",
+        f"{r.target_language_name} ({r.target_language})",
+    )
+    mc3.metric("Sekcje", str(len(r.sections)))
+
+    if r.summary:
+        st.caption(r.summary)
+
+    # Sections side-by-side
+    for sec in r.sections:
+        with st.expander(
+            f"\U0001f4c4 {sec.section_name}", expanded=True
+        ):
+            col_orig, col_trans = st.columns(2)
+            with col_orig:
+                st.markdown(f"**Orygina\u0142:**")
+                st.text(sec.original_text)
+            with col_trans:
+                st.markdown(f"**T\u0142umaczenie:**")
+                st.text(sec.translated_text)
+            if sec.notes:
+                st.caption(f"\U0001f4dd {sec.notes}")
+
+    if r.overall_notes:
+        st.info(f"**Uwagi:** {r.overall_notes}")
+
+    # Export
+    st.divider()
+    stem = Path(filename).stem
+    st.download_button(
+        "\u2b07\ufe0f Pobierz t\u0142umaczenie (TXT)",
+        data=translation_to_text(result, filename),
+        file_name=f"tlumaczenie_{stem}.txt",
+        mime="text/plain",
+        use_container_width=True,
+    )
+
+
+# -- Render design analysis report -----------------------------------------------------
+def _render_design_report(result, filename: str) -> None:
+    from html import escape as _esc
+
+    st.divider()
+
+    if not result.performed or not result.report:
+        st.error(
+            f"**Analiza graficzna nie powiod\u0142a si\u0119.**\n\n"
+            f"{result.error or 'Nieznany b\u0142\u0105d.'}"
+        )
+        return
+
+    r = result.report
+    score = r.overall_score
+
+    # Status banner
+    if score >= 80:
+        st.success(
+            f"\u2705 **Ocena: {score}/100** \u2014 {r.overall_assessment}"
+        )
+    elif score >= 60:
+        st.warning(
+            f"\u26a0\ufe0f **Ocena: {score}/100** \u2014 {r.overall_assessment}"
+        )
+    else:
+        st.error(
+            f"\u26d4 **Ocena: {score}/100** \u2014 {r.overall_assessment}"
+        )
+
+    # Metrics
+    best_cat = max(r.category_scores, key=lambda c: c.score) if r.category_scores else None
+    worst_cat = min(r.category_scores, key=lambda c: c.score) if r.category_scores else None
+
+    mc1, mc2, mc3, mc4 = st.columns(4)
+    mc1.metric("Ocena og\u00f3lna", f"{score}/100")
+    mc2.metric("Problemy", str(len(r.issues)))
+    if best_cat:
+        mc3.metric("Najlepsza", f"{best_cat.category_name} ({best_cat.score})")
+    if worst_cat:
+        mc4.metric("Najs\u0142absza", f"{worst_cat.category_name} ({worst_cat.score})")
+
+    # Score bar
+    bar_color = "#00b464" if score >= 80 else ("#ffb400" if score >= 60 else "#dc3232")
+    st.markdown(
+        f'<div class="score-bar-bg">'
+        f'<div class="score-bar-fill" style="width:{score}%;'
+        f'background:{bar_color}"></div></div>',
+        unsafe_allow_html=True,
+    )
+
+    # Strengths
+    if r.strengths:
+        with st.expander(
+            f"\u2705 Mocne strony ({len(r.strengths)})", expanded=True
+        ):
+            for s in r.strengths:
+                st.markdown(f"\u2022 {_esc(s)}", unsafe_allow_html=True)
+
+    # Category scores
+    if r.category_scores:
+        st.subheader("Oceny per kategoria")
+        for cat in r.category_scores:
+            cat_color = (
+                "\U0001f7e2" if cat.score >= 80
+                else ("\U0001f7e1" if cat.score >= 60 else "\U0001f534")
+            )
+            with st.expander(
+                f"{cat_color} {cat.category_name} \u2014 {cat.score}/100",
+                expanded=cat.score < 60,
+            ):
+                if cat.findings:
+                    st.markdown("**Obserwacje:**")
+                    for f in cat.findings:
+                        st.write(f"\u2022 {f}")
+                if cat.recommendations:
+                    st.markdown("**Rekomendacje:**")
+                    for rec in cat.recommendations:
+                        st.write(f"\u2192 {rec}")
+
+    # Issues sorted by severity
+    if r.issues:
+        _SEV_ICONS = {
+            "critical": "\U0001f534",
+            "major": "\U0001f7e0",
+            "minor": "\U0001f7e1",
+            "suggestion": "\U0001f535",
+        }
+        _SEV_LABELS = {
+            "critical": "Krytyczny",
+            "major": "Istotny",
+            "minor": "Drobny",
+            "suggestion": "Sugestia",
+        }
+        _SEV_ORDER = {"critical": 0, "major": 1, "minor": 2, "suggestion": 3}
+        sorted_issues = sorted(
+            r.issues, key=lambda i: _SEV_ORDER.get(i.severity, 9)
+        )
+        st.subheader(f"Problemy ({len(r.issues)})")
+        for issue in sorted_issues:
+            icon = _SEV_ICONS.get(issue.severity, "\u26aa")
+            label = _SEV_LABELS.get(issue.severity, issue.severity)
+            st.markdown(
+                f"{icon} **[{label}]** {_esc(issue.description)}  \n"
+                f'<span style="opacity:0.6;font-size:0.85rem;">'
+                f"\u2192 {_esc(issue.recommendation)}"
+                f"{f' | {_esc(issue.location)}' if issue.location else ''}"
+                f"</span>",
+                unsafe_allow_html=True,
+            )
+
+    # Competitive benchmarks
+    if r.competitive_benchmarks:
+        with st.expander(
+            f"\U0001f4ca Benchmark konkurencyjny ({len(r.competitive_benchmarks)})"
+        ):
+            for bm in r.competitive_benchmarks:
+                st.markdown(f"**{bm.aspect}**")
+                c1, c2 = st.columns(2)
+                c1.write(f"Obecny: {bm.current_level}")
+                c2.write(f"Standard: {bm.industry_standard}")
+                st.write(f"\u2192 {bm.suggestion}")
+                st.divider()
+
+    # Trend alignment
+    if r.trend_alignment:
+        with st.expander(
+            f"\U0001f4c8 Trendy bran\u017cowe ({len(r.trend_alignment)})"
+        ):
+            for t in r.trend_alignment:
+                st.write(f"\u2022 {t}")
+
+    # Executive summary for R&D
+    if r.actionable_summary:
+        st.subheader("\U0001f3af Podsumowanie dla R&D")
+        st.info(r.actionable_summary)
+
+    # Export
+    st.divider()
+    stem = Path(filename).stem
+    col_a, col_b = st.columns(2)
+    with col_a:
+        st.download_button(
+            "\u2b07\ufe0f Raport (TXT)",
+            data=design_to_text(result, filename),
+            file_name=f"design_{stem}.txt",
+            mime="text/plain",
+            use_container_width=True,
+        )
+    with col_b:
+        st.download_button(
+            "\u2b07\ufe0f Raport (JSON)",
+            data=result.report.model_dump_json(indent=2, exclude_none=True),
+            file_name=f"design_{stem}.json",
+            mime="application/json",
+            use_container_width=True,
+        )
+
+
 # -- Render saved report ---------------------------------------------------------------
 if st.session_state.report is not None:
     report = st.session_state.report
     # Use class name for dispatch — robust against Streamlit hot-reload
-    # (isinstance fails when module is reloaded but session_state keeps old object)
     _report_type = type(report).__name__
-    if _report_type == "LabelStructureCheckResult":
+    if _report_type == "TranslationResult":
+        _render_translation_report(
+            report,
+            st.session_state.report_filename,
+        )
+    elif _report_type == "DesignAnalysisResult":
+        _render_design_report(
+            report,
+            st.session_state.report_filename,
+        )
+    elif _report_type == "LabelStructureCheckResult":
         _render_structure_report(
             report,
             st.session_state.report_filename,

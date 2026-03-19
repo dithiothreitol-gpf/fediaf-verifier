@@ -50,15 +50,15 @@ class AIProvider(Protocol):
     def call(
         self,
         prompt: str,
-        media_b64: str,
-        media_type: str,
-        max_tokens: int,
+        media_b64: str = "",
+        media_type: str = "",
+        max_tokens: int = 4096,
     ) -> str:
-        """Send prompt + image/document and return raw text response.
+        """Send prompt + optional image/document and return raw text response.
 
         Args:
             prompt: The text prompt.
-            media_b64: Base64-encoded image or PDF.
+            media_b64: Base64-encoded image or PDF. Empty for text-only.
             media_type: MIME type (image/jpeg, image/png, application/pdf).
             max_tokens: Maximum tokens for the response.
 
@@ -85,42 +85,40 @@ class AnthropicProvider:
     def call(
         self,
         prompt: str,
-        media_b64: str,
-        media_type: str,
-        max_tokens: int,
+        media_b64: str = "",
+        media_type: str = "",
+        max_tokens: int = 4096,
     ) -> str:
-        if media_type == "application/pdf":
-            media_block: dict = {
-                "type": "document",
-                "source": {
-                    "type": "base64",
-                    "media_type": media_type,
-                    "data": media_b64,
-                },
-            }
-        else:
-            media_block = {
-                "type": "image",
-                "source": {
-                    "type": "base64",
-                    "media_type": media_type,
-                    "data": media_b64,
-                },
-            }
+        # Build content blocks
+        content: list[dict] = []
+
+        if media_b64:
+            if media_type == "application/pdf":
+                content.append({
+                    "type": "document",
+                    "source": {
+                        "type": "base64",
+                        "media_type": media_type,
+                        "data": media_b64,
+                    },
+                })
+            else:
+                content.append({
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": media_type,
+                        "data": media_b64,
+                    },
+                })
+
+        content.append({"type": "text", "text": prompt})
 
         try:
             response = self._client.messages.create(
                 model=self._model,
                 max_tokens=max_tokens,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": [
-                            media_block,
-                            {"type": "text", "text": prompt},
-                        ],
-                    }
-                ],
+                messages=[{"role": "user", "content": content}],
             )
         except anthropic.RateLimitError as e:
             raise ProviderRateLimitError(str(e)) from e
@@ -166,19 +164,20 @@ class GeminiProvider:
     def call(
         self,
         prompt: str,
-        media_b64: str,
-        media_type: str,
-        max_tokens: int,
+        media_b64: str = "",
+        media_type: str = "",
+        max_tokens: int = 4096,
     ) -> str:
         if genai_types is None:
             raise ConfigurationError("google-genai nie zainstalowane.")
 
-        media_bytes = base64.b64decode(media_b64)
-
-        parts = [
-            genai_types.Part.from_bytes(data=media_bytes, mime_type=media_type),
-            genai_types.Part.from_text(text=prompt),
-        ]
+        parts = []
+        if media_b64:
+            media_bytes = base64.b64decode(media_b64)
+            parts.append(
+                genai_types.Part.from_bytes(data=media_bytes, mime_type=media_type)
+            )
+        parts.append(genai_types.Part.from_text(text=prompt))
 
         config = genai_types.GenerateContentConfig(
             max_output_tokens=max_tokens,
@@ -245,29 +244,27 @@ class OpenAIProvider:
     def call(
         self,
         prompt: str,
-        media_b64: str,
-        media_type: str,
-        max_tokens: int,
+        media_b64: str = "",
+        media_type: str = "",
+        max_tokens: int = 4096,
     ) -> str:
-        image_url = f"data:{media_type};base64,{media_b64}"
+        msg_content: list[dict] = []
+
+        if media_b64:
+            image_url = f"data:{media_type};base64,{media_b64}"
+            msg_content.append({
+                "type": "image_url",
+                "image_url": {"url": image_url, "detail": "high"},
+            })
+
+        msg_content.append({"type": "text", "text": prompt})
 
         try:
             response = self._client.chat.completions.create(
                 model=self._model,
                 max_tokens=max_tokens,
                 response_format={"type": "json_object"},
-                messages=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "image_url",
-                                "image_url": {"url": image_url, "detail": "high"},
-                            },
-                            {"type": "text", "text": prompt},
-                        ],
-                    }
-                ],
+                messages=[{"role": "user", "content": msg_content}],
             )
         except _openai.RateLimitError as e:
             raise ProviderRateLimitError(str(e)) from e

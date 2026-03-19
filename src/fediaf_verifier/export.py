@@ -2,9 +2,11 @@
 
 
 from fediaf_verifier.models import (
+    DesignAnalysisResult,
     EnrichedReport,
     LabelStructureCheckResult,
     LinguisticCheckResult,
+    TranslationResult,
 )
 
 
@@ -391,6 +393,172 @@ def structure_to_text(
 
     if not r.structure_issues and not r.glyph_issues:
         lines.append("Nie wykryto problemow strukturalnych ani z czcionka.")
+        lines.append("")
+
+    lines.extend([
+        "=" * 60,
+        "Raport wygenerowany automatycznie. BULT Quality Check.",
+        "=" * 60,
+    ])
+
+    return "\n".join(lines)
+
+
+def translation_to_text(
+    result: TranslationResult, source_label: str,
+) -> str:
+    """Format translation as human-readable text."""
+    lines = [
+        "=" * 60,
+        "TLUMACZENIE ETYKIETY — BULT Quality Check",
+        "=" * 60,
+        f"Zrodlo: {source_label}",
+        "",
+    ]
+
+    if not result.performed or not result.report:
+        lines.append(
+            f"Tlumaczenie nie powiodlo sie: {result.error or 'nieznany blad'}"
+        )
+        return "\n".join(lines)
+
+    r = result.report
+    lines.extend([
+        f"Jezyk zrodlowy: {r.source_language_name} ({r.source_language})",
+        f"Jezyk docelowy: {r.target_language_name} ({r.target_language})",
+        f"Sekcji: {len(r.sections)}",
+        "",
+    ])
+
+    for sec in r.sections:
+        lines.append("-" * 60)
+        lines.append(f"SEKCJA: {sec.section_name}")
+        lines.append("-" * 60)
+        lines.append("ORYGINAL:")
+        for ln in sec.original_text.splitlines():
+            lines.append(f"  {ln}")
+        lines.append("")
+        lines.append("TLUMACZENIE:")
+        for ln in sec.translated_text.splitlines():
+            lines.append(f"  {ln}")
+        if sec.notes:
+            lines.append(f"\nUWAGI: {sec.notes}")
+        lines.append("")
+
+    if r.overall_notes:
+        lines.append(f"UWAGI OGOLNE: {r.overall_notes}")
+        lines.append("")
+
+    if r.summary:
+        lines.append(f"PODSUMOWANIE: {r.summary}")
+        lines.append("")
+
+    lines.extend([
+        "=" * 60,
+        "Raport wygenerowany automatycznie. BULT Quality Check.",
+        "=" * 60,
+    ])
+
+    return "\n".join(lines)
+
+
+def design_to_text(
+    result: DesignAnalysisResult, filename: str,
+) -> str:
+    """Format design analysis as human-readable text for R&D."""
+    lines = [
+        "=" * 60,
+        "ANALIZA PROJEKTU GRAFICZNEGO ETYKIETY",
+        "BULT Quality Check — raport dla R&D",
+        "=" * 60,
+        f"Plik: {filename}",
+        "",
+    ]
+
+    if not result.performed or not result.report:
+        lines.append(
+            f"Analiza nie powiodla sie: {result.error or 'nieznany blad'}"
+        )
+        return "\n".join(lines)
+
+    r = result.report
+    lines.extend([
+        f"OCENA OGOLNA: {r.overall_score}/100",
+        f"{r.overall_assessment}",
+        "",
+    ])
+
+    # Category scores
+    if r.category_scores:
+        lines.append("OCENY PER KATEGORIA:")
+        lines.append("-" * 40)
+        for cat in r.category_scores:
+            lines.append(
+                f"  [{cat.score:3d}/100] {cat.category_name.upper()}"
+            )
+            if cat.findings:
+                lines.append("    Obserwacje:")
+                for f in cat.findings:
+                    lines.append(f"      - {f}")
+            if cat.recommendations:
+                lines.append("    Rekomendacje:")
+                for rec in cat.recommendations:
+                    lines.append(f"      -> {rec}")
+            lines.append("")
+
+    # Strengths
+    if r.strengths:
+        lines.append("MOCNE STRONY:")
+        for s in r.strengths:
+            lines.append(f"  + {s}")
+        lines.append("")
+
+    # Issues sorted by severity
+    if r.issues:
+        SEV_ORDER = {"critical": 0, "major": 1, "minor": 2, "suggestion": 3}
+        SEV_LABELS = {
+            "critical": "KRYTYCZNY",
+            "major": "ISTOTNY",
+            "minor": "DROBNY",
+            "suggestion": "SUGESTIA",
+        }
+        sorted_issues = sorted(
+            r.issues, key=lambda i: SEV_ORDER.get(i.severity, 9)
+        )
+        lines.append(f"PROBLEMY ({len(r.issues)}):")
+        lines.append("-" * 40)
+        for issue in sorted_issues:
+            sev = SEV_LABELS.get(issue.severity, issue.severity.upper())
+            lines.append(f"  [{sev}] {issue.description}")
+            if issue.recommendation:
+                lines.append(f"    -> {issue.recommendation}")
+            if issue.location:
+                lines.append(f"    Lokalizacja: {issue.location}")
+        lines.append("")
+
+    # Competitive benchmarks
+    if r.competitive_benchmarks:
+        lines.append("BENCHMARK KONKURENCYJNY:")
+        lines.append("-" * 40)
+        for bm in r.competitive_benchmarks:
+            lines.append(f"  {bm.aspect}:")
+            lines.append(f"    Obecny poziom:    {bm.current_level}")
+            lines.append(f"    Standard branzy:  {bm.industry_standard}")
+            lines.append(f"    -> {bm.suggestion}")
+        lines.append("")
+
+    # Trends
+    if r.trend_alignment:
+        lines.append("TRENDY BRANZOWE:")
+        for t in r.trend_alignment:
+            lines.append(f"  - {t}")
+        lines.append("")
+
+    # Executive summary
+    if r.actionable_summary:
+        lines.append("PODSUMOWANIE DLA R&D:")
+        lines.append("-" * 40)
+        lines.append(f"  {r.actionable_summary}")
         lines.append("")
 
     lines.extend([

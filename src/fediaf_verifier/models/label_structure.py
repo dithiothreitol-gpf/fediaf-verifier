@@ -2,58 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any
+from pydantic import Field, model_validator
 
-from pydantic import BaseModel, Field, model_validator
-
-
-def _coerce_nulls(data: Any) -> Any:
-    """Pre-validator: convert None to safe defaults for AI response robustness.
-
-    AI models frequently return null for optional string fields even when
-    the prompt asks for empty strings.  This avoids Pydantic validation
-    errors without loosening the type system.
-    """
-    if not isinstance(data, dict):
-        return data
-    for key, val in list(data.items()):
-        if val is None:
-            # Leave bbox, missing_characters etc. as None — they are typed
-            # as Optional.  Only coerce fields that are plain str/bool/list.
-            continue
-        if isinstance(val, list):
-            data[key] = [
-                _coerce_nulls(item) if isinstance(item, dict) else item
-                for item in val
-            ]
-        elif isinstance(val, dict) and key not in ("diacritics_check",):
-            data[key] = _coerce_nulls(val)
-    return data
+from .base import NullSafeBase
 
 
-class _NullSafeBase(BaseModel):
-    """BaseModel that converts None → '' for str fields before validation."""
-
-    @model_validator(mode="before")
-    @classmethod
-    def _null_to_empty(cls, data: Any) -> Any:
-        if not isinstance(data, dict):
-            return data
-        field_types = cls.model_fields
-        for key, val in list(data.items()):
-            if val is None and key in field_types:
-                annotation = field_types[key].annotation
-                # If the field is a plain str (not Optional[str]), replace None
-                if annotation is str:
-                    data[key] = ""
-                elif annotation is bool:
-                    data[key] = False
-                elif annotation is int:
-                    data[key] = 0
-        return data
-
-
-class LanguageSectionInfo(_NullSafeBase):
+class LanguageSectionInfo(NullSafeBase):
     """Single language section detected on the label."""
 
     language_code: str = Field(description="ISO 639-1 code, e.g. 'pl', 'de'")
@@ -98,7 +52,7 @@ class LanguageSectionInfo(_NullSafeBase):
     )
 
 
-class GlyphIssue(_NullSafeBase):
+class GlyphIssue(NullSafeBase):
     """A single font/glyph problem detected on the label."""
 
     language_code: str = Field(
@@ -133,7 +87,7 @@ class GlyphIssue(_NullSafeBase):
     )
 
 
-class StructureIssue(_NullSafeBase):
+class StructureIssue(NullSafeBase):
     """A structural problem with language sections layout."""
 
     issue_type: str = Field(
@@ -160,7 +114,7 @@ class StructureIssue(_NullSafeBase):
     )
 
 
-class LabelStructureReport(_NullSafeBase):
+class LabelStructureReport(NullSafeBase):
     """AI output for label structure & font verification."""
 
     # Language sections found
@@ -231,7 +185,7 @@ class LabelStructureReport(_NullSafeBase):
         return self
 
 
-class LabelStructureCheckResult(_NullSafeBase):
+class LabelStructureCheckResult(NullSafeBase):
     """Pipeline result wrapping LabelStructureReport + error handling."""
 
     performed: bool = False
