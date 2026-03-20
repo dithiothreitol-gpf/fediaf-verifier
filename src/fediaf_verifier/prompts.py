@@ -55,11 +55,12 @@ Sprawdz caly tekst na etykiecie pod katem:
 - Interpunkcja
 - Spojnosc terminologii (mieszanie jezykow w jednym bloku, np. "bialko" obok "protein")
 Automatycznie wykryj jezyk(i).
-WAZNE: W polu "original" wpisuj tekst DOKLADNIE jak na etykiecie — \
-ze znakami diakrytycznymi jesli sa widoczne. NIE usuwaj diakrytykow z oryginalu. \
-ZANIM zgloszisz brak diakrytykow — upewnij sie ze RZECZYWISCIE brakuje znaku na obrazie. \
+WAZNE: Pole "original" = DOKLADNA kopia tekstu z etykiety (z diakrytykami \
+jesli widoczne). ZANIM zgloszisz brak diakrytyku — PRZYJRZYJ SIE uwaznie \
+czy znak RZECZYWISCIE brakuje. Jesli nie jestes pewny — nie zglaszaj. \
+Kazdy fragment zglaszaj MAX RAZ (bez duplikatow). \
 NIE zglaszaj: tekstu poprawnego, celowej kapitalizacji w claimach, \
-celowych zapisow dwujezycznych. Zglaszaj WYLACZNIE rzeczywiste bledy.
+celowych zapisow dwujezycznych.
 
 Odpowiedz WYLACZNIE poprawnym JSON (bez markdown). Badz ZWIEZLY — krotkie opisy, max 10 najwazniejszych bledow jezykowych. Pola:
 cross_crude_protein/fat/fibre/moisture/crude_ash/calcium/phosphorus (liczby lub null),
@@ -85,22 +86,31 @@ a→ą, e→ę, s→ś, c→ć, z→ź/ż, l→ł, n→ń, o→ó
 Automatycznie wykryj jezyk(i) na etykiecie.
 Badz dokladny — sprawdz KAZDY fragment tekstu.
 
-WAZNE — ZASADY RAPORTOWANIA:
-1. W polu "original" wpisuj tekst DOKLADNIE tak jak widnieje na etykiecie — \
-litera po literze, ze znakami diakrytycznymi jesli sa widoczne. \
-NIE usuwaj diakrytykow z oryginalnego tekstu. \
-Jesli na etykiecie jest "Składniki" — wpisz "Składniki", NIE "Skladniki".
-2. Zglaszaj WYLACZNIE rzeczywiste bledy. \
-Jesli tekst jest poprawny — NIE dodawaj go do listy issues.
-3. NIE zglaszaj jako bledow:
-- Celowej kapitalizacji w claimach marketingowych (np. "bez Soi", "bez GMO" — \
-wielkie litery to standard branzy pet food)
-- Celowych zapisow dwujezycznych w strefach ikon/badge'ow \
-(np. "HIGHLY DIGESTIBLE / LATWO PRZYSWAJALNA")
-- Formatow wielojezycznych w polach formalnych \
-(np. "Producent / Hersteller / Fabricant")
-4. ZANIM zgloszisz brak diakrytykow — upewnij sie ze na obrazie \
-RZECZYWISCIE brakuje znaku. Nie zakladaj z gory ze brakuje.
+KRYTYCZNE ZASADY — przeczytaj zanim zaczniesz:
+
+1. DOKLADNOSC TRANSKRYPCJI — w polu "original" wpisuj tekst DOKLADNIE \
+tak jak widnieje na etykiecie, litera po literze. \
+Jesli na obrazie widzisz "Składniki" ze znakiem ł — wpisz "Składniki". \
+NIE zamieniaj liter na ich odpowiedniki bez diakrytykow. \
+Pole "original" musi byc WIERNYM odwzorowaniem tego co jest na etykiecie.
+
+2. WERYFIKACJA PRZED ZGLOSZENIEM — zanim zgloszisz brak diakrytyku, \
+PRZYJRZYJ SIE UWAZNIE danemu slowu na obrazie. \
+Znaki ł/l, ą/a, ę/e, ó/o moga byc trudne do rozroznienia przy malym foncie. \
+Jesli NIE JESTES PEWNY czy znak diakrytyczny jest obecny — NIE zglaszaj. \
+Lepiej pominac watpliwy przypadek niz zglaszac false positive.
+
+3. BEZ DUPLIKATOW — kazdy fragment tekstu zglaszaj MAKSYMALNIE RAZ. \
+Jesli "Skladniki" wystepuje 5 razy bez diakrytykow — zglos to RAZ \
+z adnotacja ile razy wystepuje, nie 5 osobnych issues.
+
+4. TYLKO BLEDY — nie umieszczaj w liście issues elementow poprawnych. \
+Jesli tekst jest prawidlowy — nie dodawaj go.
+
+5. KONWENCJE BRANZY PET FOOD — nie zglaszaj:
+- Celowej kapitalizacji w claimach (np. "bez Soi", "bez GMO")
+- Celowych zapisow dwujezycznych w ikonach/badge'ach
+- Formatow wielojezycznych w polach formalnych
 
 Odpowiedz WYLACZNIE poprawnym JSON (bez markdown). Pola:
 detected_language (np. "pl"), detected_language_name (np. "polski"),
