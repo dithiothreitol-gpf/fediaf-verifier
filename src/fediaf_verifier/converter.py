@@ -17,8 +17,50 @@ from fediaf_verifier.exceptions import (
 )
 
 
+# Maximum base64 size before compression (~20MB raw = ~27MB base64)
+_MAX_B64_SIZE = 20 * 1024 * 1024
+
+
+def _compress_image(file_bytes: bytes, max_size: int = _MAX_B64_SIZE) -> tuple[bytes, str]:
+    """Compress image if too large. Returns (bytes, media_type)."""
+    if len(file_bytes) <= max_size:
+        return file_bytes, ""
+
+    try:
+        from PIL import Image
+
+        img = Image.open(io.BytesIO(file_bytes))
+
+        # Resize if very large (>4000px on any side)
+        max_dim = 4000
+        if max(img.size) > max_dim:
+            ratio = max_dim / max(img.size)
+            new_size = (int(img.size[0] * ratio), int(img.size[1] * ratio))
+            img = img.resize(new_size, Image.LANCZOS)
+            logger.info("Image resized: {} -> {}", img.size, new_size)
+
+        # Save as JPEG with quality reduction
+        buf = io.BytesIO()
+        if img.mode in ("RGBA", "P"):
+            img = img.convert("RGB")
+        img.save(buf, format="JPEG", quality=85, optimize=True)
+        compressed = buf.getvalue()
+        logger.info(
+            "Image compressed: {:.1f}MB -> {:.1f}MB",
+            len(file_bytes) / 1_048_576,
+            len(compressed) / 1_048_576,
+        )
+        return compressed, "image/jpeg"
+    except Exception as e:
+        logger.warning("Image compression failed: {}", e)
+        return file_bytes, ""
+
+
 def file_to_base64(file_bytes: bytes, filename: str) -> tuple[str, str]:
     """Convert a label file to base64.
+
+    Compresses large images automatically. For PDFs over the size limit,
+    logs a warning (API may reject).
 
     Args:
         file_bytes: Raw file bytes.
@@ -34,10 +76,14 @@ def file_to_base64(file_bytes: bytes, filename: str) -> tuple[str, str]:
     suffix = Path(filename).suffix.lower()
 
     if suffix in (".jpg", ".jpeg"):
-        return base64.b64encode(file_bytes).decode(), "image/jpeg"
+        compressed, new_type = _compress_image(file_bytes)
+        media = new_type or "image/jpeg"
+        return base64.b64encode(compressed).decode(), media
 
     if suffix == ".png":
-        return base64.b64encode(file_bytes).decode(), "image/png"
+        compressed, new_type = _compress_image(file_bytes)
+        media = new_type or "image/png"
+        return base64.b64encode(compressed).decode(), media
 
     if suffix == ".webp":
         return base64.b64encode(file_bytes).decode(), "image/webp"
@@ -46,6 +92,13 @@ def file_to_base64(file_bytes: bytes, filename: str) -> tuple[str, str]:
         return base64.b64encode(file_bytes).decode(), "image/gif"
 
     if suffix == ".pdf":
+        size_mb = len(file_bytes) / 1_048_576
+        if size_mb > 25:
+            logger.warning(
+                "PDF is very large ({:.1f}MB) — API may reject. "
+                "Consider using a smaller file or single-page export.",
+                size_mb,
+            )
         return base64.b64encode(file_bytes).decode(), "application/pdf"
 
     if suffix == ".docx":

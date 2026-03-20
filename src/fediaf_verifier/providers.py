@@ -140,6 +140,16 @@ class AnthropicProvider:
             )
         except anthropic.RateLimitError as e:
             raise ProviderRateLimitError(str(e)) from e
+        except anthropic.BadRequestError as e:
+            error_msg = str(e).lower()
+            if "too large" in error_msg or "too many" in error_msg or "size" in error_msg:
+                raise ProviderAPIError(
+                    "Plik jest za duzy dla API. Sprobuj:\n"
+                    "- Wyeksportowac etykiete jako pojedyncza strone\n"
+                    "- Zmniejszyc rozdzielczosc obrazu\n"
+                    "- Uzyc formatu JPG zamiast PNG/PDF"
+                ) from e
+            raise ProviderAPIError(str(e)) from e
         except anthropic.APIError as e:
             raise ProviderAPIError(str(e)) from e
 
