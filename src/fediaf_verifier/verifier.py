@@ -48,6 +48,26 @@ from fediaf_verifier.providers import (
 from fediaf_verifier.utils import api_call_with_retry, extract_json
 
 
+def _get_collector(settings: AppSettings):
+    """Lazy-init shared DataCollector instance."""
+    if not settings.data_collection_enabled:
+        return None
+
+    key = "_data_collector"
+    if not hasattr(_get_collector, key):
+        from fediaf_verifier.data_collector import DataCollector
+
+        setattr(
+            _get_collector,
+            key,
+            DataCollector(
+                base_dir=settings.data_collection_dir,
+                enabled=True,
+            ),
+        )
+    return getattr(_get_collector, key)
+
+
 def _self_verify(
     result_json: str,
     label_b64: str,
@@ -55,11 +75,14 @@ def _self_verify(
     provider: AIProvider,
     settings: AppSettings,
     model_class: type,
+    mode: str = "unknown",
+    prompt_used: str = "",
 ) -> object:
     """Send AI result back for self-verification (reflection step).
 
     Asks a second AI call to compare the result against the original image
     and remove false positives, duplicates, and hallucinations.
+    Also collects training data if data_collection_enabled.
 
     Args:
         result_json: JSON string of the initial AI result.
@@ -68,39 +91,58 @@ def _self_verify(
         provider: AI provider for the verification call.
         settings: Application settings.
         model_class: Pydantic model class to validate the corrected result.
+        mode: Verification mode name for data collection.
+        prompt_used: Original prompt for data collection.
 
     Returns:
-        Verified and corrected model instance, or original if verification fails.
+        Verified and corrected model instance, or None if verification
+        is disabled or fails.
     """
-    if not settings.self_verify_enabled:
-        return None
+    raw_data = json.loads(result_json)
+    verified_data = None
+    corrected = None
 
-    logger.info("Self-verify: verifying AI result against original image...")
+    if settings.self_verify_enabled:
+        logger.info("Self-verify: verifying AI result against original image...")
 
-    try:
-        # Use string concatenation instead of .format() to avoid
-        # KeyError when result_json contains curly braces
-        prompt = SELF_VERIFY_PROMPT + "\n\n" + result_json
+        try:
+            # Use string concatenation instead of .format() to avoid
+            # KeyError when result_json contains curly braces
+            verify_prompt = SELF_VERIFY_PROMPT + "\n\n" + result_json
 
-        # Use same token budget as the original call (result can be large)
-        max_tokens = max(
-            settings.max_tokens_linguistic,
-            len(result_json) // 3 + 2048,  # rough estimate: ~3 chars/token + headroom
-        )
+            # Use same token budget as the original call (result can be large)
+            max_tokens = max(
+                settings.max_tokens_linguistic,
+                len(result_json) // 3 + 2048,
+            )
 
-        raw = provider.call(
-            prompt=prompt,
-            media_b64=label_b64,
+            raw = provider.call(
+                prompt=verify_prompt,
+                media_b64=label_b64,
+                media_type=media_type,
+                max_tokens=min(max_tokens, 16384),
+            )
+            corrected_json = extract_json(raw)
+            verified_data = json.loads(corrected_json)
+            corrected = model_class.model_validate(verified_data)
+            logger.info("Self-verify: result corrected successfully")
+        except Exception as e:
+            logger.warning("Self-verify failed (using original result): {}", e)
+
+    # Collect training data (regardless of self-verify success)
+    collector = _get_collector(settings)
+    if collector is not None:
+        collector.record(
+            mode=mode,
+            model=getattr(provider, "_model", getattr(provider, "model", "unknown")),
+            prompt=prompt_used,
+            image_b64=label_b64,
             media_type=media_type,
-            max_tokens=min(max_tokens, 16384),  # cap at 16K
+            raw_response=raw_data,
+            verified_response=verified_data,
         )
-        corrected_json = extract_json(raw)
-        corrected = model_class.model_validate(json.loads(corrected_json))
-        logger.info("Self-verify: result corrected successfully")
-        return corrected
-    except Exception as e:
-        logger.warning("Self-verify failed (using original result): {}", e)
-        return None
+
+    return corrected
 
 
 def create_providers(
@@ -327,6 +369,8 @@ def verify_claims(
             provider=provider,
             settings=settings,
             model_class=ClaimsCheckReport,
+            mode="claims",
+            prompt_used=CLAIMS_CHECK_PROMPT,
         )
         if corrected is not None:
             report = corrected
@@ -595,6 +639,8 @@ def verify_label_structure(
             provider=provider,
             settings=settings,
             model_class=LabelStructureReport,
+            mode="structure",
+            prompt_used=LABEL_STRUCTURE_PROMPT,
         )
         if corrected is not None:
             report = corrected
@@ -646,6 +692,8 @@ def verify_linguistic_only(
             provider=provider,
             settings=settings,
             model_class=LinguisticReport,
+            mode="linguistic",
+            prompt_used=LINGUISTIC_ONLY_PROMPT,
         )
         if corrected is not None:
             report = corrected
@@ -721,6 +769,8 @@ def verify_market_compliance(
             provider=provider,
             settings=settings,
             model_class=MarketCheckReport,
+            mode="market",
+            prompt_used=prompt,
         )
         if corrected is not None:
             report = corrected

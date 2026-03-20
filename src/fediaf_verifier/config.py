@@ -85,6 +85,10 @@ class AppSettings(BaseSettings):
     # Self-verification (reflection step) — doubles API calls but reduces false positives
     self_verify_enabled: bool = True
 
+    # Training data collection for future fine-tuning
+    data_collection_enabled: bool = False
+    data_collection_dir: str = "data/training"
+
     # Logging
     log_level: str = "INFO"
 
