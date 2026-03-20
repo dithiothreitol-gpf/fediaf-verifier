@@ -119,6 +119,42 @@ issue_type: "spelling"/"grammar"/"punctuation"/"diacritics"/"terminology",
 overall_quality ("excellent"/"good"/"needs_review"/"poor"),
 summary (krotkie podsumowanie jakosci tekstu)."""
 
+# -- Self-verification prompt (reflection step) ----------------------------------------
+
+SELF_VERIFY_PROMPT = """\
+Jestes recenzentem jakosci AI. Otrzymujesz:
+1. ORYGINALNY OBRAZ etykiety
+2. WYNIK ANALIZY w formacie JSON wygenerowany przez inny model AI
+
+Twoje zadanie: ZWERYFIKUJ kazdy element wyniku porownujac go z tym \
+co RZECZYWISCIE widac na obrazie. Szukaj:
+
+A) FALSE POSITIVE — zgloszono problem ktorego NIE MA na obrazie:
+   - Zgloszono brak diakrytyku ale na obrazie diakrytyk JEST widoczny
+   - Zgloszono blad ortograficzny ale slowo jest poprawne
+   - Zgloszono niezgodnosc ktora nie istnieje
+   - Pole "original" nie odpowiada temu co jest na obrazie
+
+B) DUPLIKATY — ten sam problem zgloszony wiecej niz raz
+
+C) HALUCYNACJE — zgloszono tekst ktory w ogole nie wystepuje na etykiecie
+
+Dla KAZDEGO elementu w wyniku:
+- POROWNAJ z obrazem
+- Jesli element jest POPRAWNY — zachowaj go
+- Jesli element jest FALSE POSITIVE — USUN go
+- Jesli pole "original" jest bledne — POPRAW je
+
+WAZNE: Badz SUROWY. Lepiej usunac watpliwy element niz zostawic false positive.
+W razie watpliwosci — USUN.
+
+Zwroc POPRAWIONY wynik w IDENTYCZNYM formacie JSON jak wejscie \
+(te same pola, ta sama struktura). Nie dodawaj nowych pol. \
+Usun false-positive elementy z list. Zaktualizuj summary/quality \
+jesli lista bledow sie zmienila.
+
+WYNIK DO WERYFIKACJI (JSON poniżej):"""
+
 # -- Label structure & font completeness check prompt ---------------------------------
 
 LABEL_STRUCTURE_PROMPT = """\

@@ -82,6 +82,9 @@ class AppSettings(BaseSettings):
     # Per-market compliance check
     max_tokens_market: int = 12288
 
+    # Self-verification (reflection step) — doubles API calls but reduces false positives
+    self_verify_enabled: bool = True
+
     # Logging
     log_level: str = "INFO"
 

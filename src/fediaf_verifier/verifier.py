@@ -35,6 +35,7 @@ from fediaf_verifier.prompts import (
     LABEL_STRUCTURE_PROMPT,
     LINGUISTIC_ONLY_PROMPT,
     SECONDARY_CHECK_PROMPT,
+    SELF_VERIFY_PROMPT,
     build_label_text_prompt,
     build_market_check_prompt,
     build_translation_prompt,
@@ -45,6 +46,61 @@ from fediaf_verifier.providers import (
     create_provider,
 )
 from fediaf_verifier.utils import api_call_with_retry, extract_json
+
+
+def _self_verify(
+    result_json: str,
+    label_b64: str,
+    media_type: str,
+    provider: AIProvider,
+    settings: AppSettings,
+    model_class: type,
+) -> object:
+    """Send AI result back for self-verification (reflection step).
+
+    Asks a second AI call to compare the result against the original image
+    and remove false positives, duplicates, and hallucinations.
+
+    Args:
+        result_json: JSON string of the initial AI result.
+        label_b64: Original label image as base64.
+        media_type: MIME type of the label.
+        provider: AI provider for the verification call.
+        settings: Application settings.
+        model_class: Pydantic model class to validate the corrected result.
+
+    Returns:
+        Verified and corrected model instance, or original if verification fails.
+    """
+    if not settings.self_verify_enabled:
+        return None
+
+    logger.info("Self-verify: verifying AI result against original image...")
+
+    try:
+        # Use string concatenation instead of .format() to avoid
+        # KeyError when result_json contains curly braces
+        prompt = SELF_VERIFY_PROMPT + "\n\n" + result_json
+
+        # Use same token budget as the original call (result can be large)
+        max_tokens = max(
+            settings.max_tokens_linguistic,
+            len(result_json) // 3 + 2048,  # rough estimate: ~3 chars/token + headroom
+        )
+
+        raw = provider.call(
+            prompt=prompt,
+            media_b64=label_b64,
+            media_type=media_type,
+            max_tokens=min(max_tokens, 16384),  # cap at 16K
+        )
+        corrected_json = extract_json(raw)
+        corrected = model_class.model_validate(json.loads(corrected_json))
+        logger.info("Self-verify: result corrected successfully")
+        return corrected
+    except Exception as e:
+        logger.warning("Self-verify failed (using original result): {}", e)
+        return None
 
 
 def create_providers(
@@ -262,6 +318,19 @@ def verify_claims(
         data = json.loads(json_text)
 
         report = ClaimsCheckReport.model_validate(data)
+
+        # Self-verify: send result back to AI for false-positive removal
+        corrected = _self_verify(
+            result_json=json_text,
+            label_b64=label_b64,
+            media_type=media_type,
+            provider=provider,
+            settings=settings,
+            model_class=ClaimsCheckReport,
+        )
+        if corrected is not None:
+            report = corrected
+
         return ClaimsCheckResult(performed=True, report=report)
 
     try:
@@ -517,6 +586,19 @@ def verify_label_structure(
         data = json.loads(json_text)
 
         report = LabelStructureReport.model_validate(data)
+
+        # Self-verify: send result back to AI for false-positive removal
+        corrected = _self_verify(
+            result_json=json_text,
+            label_b64=label_b64,
+            media_type=media_type,
+            provider=provider,
+            settings=settings,
+            model_class=LabelStructureReport,
+        )
+        if corrected is not None:
+            report = corrected
+
         return LabelStructureCheckResult(performed=True, report=report)
 
     try:
@@ -555,6 +637,19 @@ def verify_linguistic_only(
         from fediaf_verifier.models import LinguisticReport
 
         report = LinguisticReport.model_validate(data)
+
+        # Self-verify: send result back to AI for false-positive removal
+        corrected = _self_verify(
+            result_json=json_text,
+            label_b64=label_b64,
+            media_type=media_type,
+            provider=provider,
+            settings=settings,
+            model_class=LinguisticReport,
+        )
+        if corrected is not None:
+            report = corrected
+
         return LinguisticCheckResult(performed=True, report=report)
 
     try:
@@ -617,6 +712,19 @@ def verify_market_compliance(
         data = json.loads(json_text)
 
         report = MarketCheckReport.model_validate(data)
+
+        # Self-verify: send result back to AI for false-positive removal
+        corrected = _self_verify(
+            result_json=json_text,
+            label_b64=label_b64,
+            media_type=media_type,
+            provider=provider,
+            settings=settings,
+            model_class=MarketCheckReport,
+        )
+        if corrected is not None:
+            report = corrected
+
         return MarketCheckResult(performed=True, report=report)
 
     try:
