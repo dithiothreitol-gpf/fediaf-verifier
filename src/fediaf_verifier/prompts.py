@@ -55,6 +55,11 @@ Sprawdz caly tekst na etykiecie pod katem:
 - Interpunkcja
 - Spojnosc terminologii (mieszanie jezykow w jednym bloku, np. "bialko" obok "protein")
 Automatycznie wykryj jezyk(i).
+WAZNE: W polu "original" wpisuj tekst DOKLADNIE jak na etykiecie — \
+ze znakami diakrytycznymi jesli sa widoczne. NIE usuwaj diakrytykow z oryginalu. \
+ZANIM zgloszisz brak diakrytykow — upewnij sie ze RZECZYWISCIE brakuje znaku na obrazie. \
+NIE zglaszaj: tekstu poprawnego, celowej kapitalizacji w claimach, \
+celowych zapisow dwujezycznych. Zglaszaj WYLACZNIE rzeczywiste bledy.
 
 Odpowiedz WYLACZNIE poprawnym JSON (bez markdown). Badz ZWIEZLY — krotkie opisy, max 10 najwazniejszych bledow jezykowych. Pola:
 cross_crude_protein/fat/fibre/moisture/crude_ash/calcium/phosphorus (liczby lub null),
@@ -79,6 +84,23 @@ a→ą, e→ę, s→ś, c→ć, z→ź/ż, l→ł, n→ń, o→ó
 
 Automatycznie wykryj jezyk(i) na etykiecie.
 Badz dokladny — sprawdz KAZDY fragment tekstu.
+
+WAZNE — ZASADY RAPORTOWANIA:
+1. W polu "original" wpisuj tekst DOKLADNIE tak jak widnieje na etykiecie — \
+litera po literze, ze znakami diakrytycznymi jesli sa widoczne. \
+NIE usuwaj diakrytykow z oryginalnego tekstu. \
+Jesli na etykiecie jest "Składniki" — wpisz "Składniki", NIE "Skladniki".
+2. Zglaszaj WYLACZNIE rzeczywiste bledy. \
+Jesli tekst jest poprawny — NIE dodawaj go do listy issues.
+3. NIE zglaszaj jako bledow:
+- Celowej kapitalizacji w claimach marketingowych (np. "bez Soi", "bez GMO" — \
+wielkie litery to standard branzy pet food)
+- Celowych zapisow dwujezycznych w strefach ikon/badge'ow \
+(np. "HIGHLY DIGESTIBLE / LATWO PRZYSWAJALNA")
+- Formatow wielojezycznych w polach formalnych \
+(np. "Producent / Hersteller / Fabricant")
+4. ZANIM zgloszisz brak diakrytykow — upewnij sie ze na obrazie \
+RZECZYWISCIE brakuje znaku. Nie zakladaj z gory ze brakuje.
 
 Odpowiedz WYLACZNIE poprawnym JSON (bez markdown). Pola:
 detected_language (np. "pl"), detected_language_name (np. "polski"),
