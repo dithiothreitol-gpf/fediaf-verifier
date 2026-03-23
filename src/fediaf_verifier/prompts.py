@@ -699,6 +699,352 @@ complete_text (caly tekst etykiety jako jeden string),
 summary (krotkie podsumowanie)."""
 
 
+# -- Product description generation prompt -------------------------------------
+
+
+_TONE_INSTRUCTIONS = {
+    "premium": (
+        "Styl PREMIUM / LUKSUSOWY: Uzywaj aspiracyjnego jezyka, podkreslaj "
+        "ekskluzywnosc, rzemieślnicza jakosc, starannosc w doborze skladnikow. "
+        "Slowa kluczowe: 'wyselekcjonowane', 'najwyzszej jakosci', 'wyjatkowa receptura'. "
+        "Ton elegancki, pewny siebie, budujacy poczucie luksusu."
+    ),
+    "scientific": (
+        "Styl NAUKOWY / WETERYNARYJNY: Uzywaj precyzyjnej terminologii naukowej, "
+        "cytuj funkcje odzywcze, odwoluj sie do badan i standardow FEDIAF. "
+        "Ton autorytatywny, merytoryczny, budujacy zaufanie profesjonalistow. "
+        "Podkreslaj aspekty kliniczne i naukowo potwierdzone korzysci."
+    ),
+    "natural": (
+        "Styl NATURALNY / WHOLESOME: Podkreslaj naturalne pochodzenie skladnikow, "
+        "narracje 'od pola do miski', minimalne przetworzenie, bliskosc natury. "
+        "Slowa kluczowe: 'naturalny', 'prawdziwy', 'starannie dobrany', "
+        "'z naturalnych zrodel'. Ton ciepły, autentyczny, bliski naturze."
+    ),
+    "standard": (
+        "Styl STANDARDOWY / NEUTRALNY: Jasny, informacyjny, zrownowazony ton "
+        "odpowiedni do ogolnej sprzedazy detalicznej. Rzeczowy i przystepny, "
+        "bez nadmiernej egzaltacji. Skupiony na faktach i korzyściach."
+    ),
+}
+
+
+def build_product_description_prompt(
+    species: str,
+    lifestage: str,
+    food_type: str,
+    ingredients: str,
+    nutrients: dict,
+    target_language: str,
+    target_language_name: str,
+    tone: str,
+    product_name: str = "",
+    usps: str = "",
+    brand: str = "",
+) -> str:
+    """Build prompt for generating a commercial product description.
+
+    Args:
+        species: Target species (e.g. "dog", "cat").
+        lifestage: Lifestage (e.g. "adult", "puppy").
+        food_type: Food type (e.g. "dry", "wet").
+        ingredients: Ingredients list as text.
+        nutrients: Dict of analytical constituents.
+        target_language: ISO 639-1 code (e.g. "en", "de", "pl").
+        target_language_name: Full language name.
+        tone: Description tone: "premium", "scientific", "natural", "standard".
+        product_name: Optional product name.
+        usps: Optional unique selling points (free text).
+        brand: Optional brand name.
+
+    Returns:
+        Complete prompt string for product description generation.
+    """
+    nutrient_lines = []
+    nutrient_labels = {
+        "crude_protein": "Crude protein / Bialko surowe",
+        "crude_fat": "Crude fat / Tluszcz surowy",
+        "crude_fibre": "Crude fibre / Wlokno surowe",
+        "moisture": "Moisture / Wilgotnosc",
+        "crude_ash": "Crude ash / Popiol surowy",
+        "calcium": "Calcium / Wapn",
+        "phosphorus": "Phosphorus / Fosfor",
+    }
+    for key, label in nutrient_labels.items():
+        val = nutrients.get(key)
+        if val is not None:
+            nutrient_lines.append(f"  {label}: {val}%")
+    nutrients_text = "\n".join(nutrient_lines) if nutrient_lines else "  (brak danych)"
+
+    product_block = ""
+    if product_name:
+        product_block = f"\nNAZWA PRODUKTU: {product_name}\n"
+    if brand:
+        product_block += f"MARKA: {brand}\n"
+
+    usps_block = ""
+    if usps.strip():
+        usps_block = (
+            f"\nUNIKALNE CECHY PRODUKTU (USP):\n{usps.strip()}\n"
+        )
+
+    tone_instruction = _TONE_INSTRUCTIONS.get(tone, _TONE_INSTRUCTIONS["standard"])
+
+    return f"""\
+Jestes doswiadczonym copywriterem specjalizujacym sie w branzy pet food \
+z gleboka znajomoscia regulacji FEDIAF i EU 767/2009. \
+Wygeneruj KOMPLETNY OPIS KOMERCYJNY produktu karmy dla zwierzat \
+w jezyku: {target_language_name} ({target_language}).
+
+STYL OPISU:
+{tone_instruction}
+{product_block}
+DANE WEJSCIOWE:
+Gatunek: {species}
+Etap zycia: {lifestage}
+Typ karmy: {food_type}
+
+SKLADNIKI (lista w kolejnosci malejacej udzialu):
+{ingredients}
+
+SKLADNIKI ANALITYCZNE:
+{nutrients_text}
+{usps_block}
+WYGENERUJ NASTEPUJACE SEKCJE:
+
+1. HEADLINE (section_name: "headline")
+   Jedno zdanie — chwytliwy, przekonujacy opis pozycjonujacy produkt.
+   Maks 15 slow. Podkresla glowna przewage produktu.
+
+2. KEY BENEFITS (section_name: "key_benefits")
+   3-5 zdań mapujacych KONKRETNE skladniki na KONKRETNE korzysci:
+   - Bialko → utrzymanie szczuplej masy miesniowej
+   - Kwasy omega → zdrowa skora i lsniaca siersc
+   - Blonnik/prebiotyki → zdrowe trawienie i wchłanianie
+   - Antyoksydanty → wsparcie ukladu odpornosciowego
+   - Glukozamina/EPA → zdrowe stawy i mobilnosc
+   - Wapn + fosfor → mocne kosci i zeby
+   - L-karnityna → zdrowa masa ciala
+   Uzywaj jezyka korzysci ("wspiera zdrowe trawienie") nie cech ("zawiera blonnik").
+
+3. INGREDIENT STORY (section_name: "ingredient_story")
+   2-4 zdania narracji o skladnikach: skad pochodza, co je wyróznia, \
+   dlaczego zostaly wybrane. Podkresla glowne zrodlo bialka. \
+   Jesli podano USP — wpleć je naturalnie.
+
+4. TARGET ANIMAL PROFILE (section_name: "target_animal_profile")
+   Dla kogo jest ta karma: gatunek, etap zycia, rozmiar, \
+   potrzeby zdrowotne, poziom aktywnosci. 2-3 zdania.
+
+5. NUTRITIONAL HIGHLIGHTS (section_name: "nutritional_highlights")
+   Kluczowe skladniki odzywcze z wyjasnieniem funkcji. \
+   Podaj konkretne wartosci % tam gdzie dostepne.
+
+6. FEEDING SUMMARY (section_name: "feeding_summary")
+   Uproszczone wskazowki dawkowania dla e-commerce (2-3 zdania). \
+   Nie tabela — tylko ogolne zalecenia z adnotacja \
+   "szczegolowe dawkowanie na opakowaniu".
+
+7. CLAIMS & CERTIFICATIONS (section_name: "claims_certifications")
+   Lista claimow marketingowych ktore MOZNA uzyc na podstawie skladu. \
+   Kazdy claim musi byc UZASADNIONY danymi wejsciowymi.
+
+8. SEO METADATA (obiekt "seo"):
+   - meta_title: maks 60 znakow, z glownym slowem kluczowym
+   - meta_description: maks 160 znakow, z CTA
+   - keywords: 5-10 slow kluczowych (long-tail, z intencja zakupowa)
+   - focus_keyword: glowne slowo kluczowe
+
+GUARDRAILS REGULACYJNE (OBOWIAZKOWE):
+
+A) REGULY NAZEWNICTWA FEDIAF (procent skladnika w nazwie/claimie):
+   - "z X" / "with X" = minimum 4% skladnika X
+   - "bogaty w X" / "rich in X" = minimum 14% skladnika X
+   - X jako glowna nazwa = minimum 26% skladnika X
+   Jesli dane procentowe sa dostepne — SPRAWDZ czy claim jest uzasadniony. \
+   Jesli brak danych % — dodaj ostrzezenie w claims_warnings.
+
+B) ZAKAZANE CLAIMY TERAPEUTYCZNE (EU 767/2009 Art.13):
+   NIGDY nie uzywaj slow: "leczy", "zapobiega", "likwiduje", "eliminuje choroby", \
+   "terapeutyczny", "leczniczy", "medyczny", "zastepuje leczenie weterynaryjne".
+   Dopuszczalne claimy funkcjonalne: "wspiera trawienie", "zdrowa siersc".
+
+C) CLAIM "NATURAL" — tylko jesli WSZYSTKIE skladniki sa naturalnego pochodzenia \
+   (roslinne/zwierzece/mineralne) bez syntetycznych dodatkow. \
+   Jesli na liscie sa syntetyczne witaminy — claim "natural" wymaga \
+   zastrzezenia "z dodanymi witaminami i mineralami".
+
+D) CLAIM "GRAIN-FREE" — tylko jesli ZADEN skladnik nie jest zbozen: \
+   pszenica, jeczmien, owies, zyto, kukurydza, ryz, proso, sorgo, orkisz.
+
+E) CLAIM "HYPOALLERGENIC" — wymaga rygorystycznego dowodu, nie uzywaj \
+   bez wyraznej podstawy w skladzie (np. limitowane zrodla bialka).
+
+Jesli JAKIKOLWIEK claim jest watpliwy — dodaj wpis do claims_warnings z polami:
+claim_text, warning_type ("forbidden_therapeutic"/"unsubstantiated"/\
+"naming_rule_violation"/"needs_evidence"), explanation, recommendation.
+
+DODATKOWE POLA DO WYGENEROWANIA:
+
+- headline: 1 zdanie hook (ten sam tekst co sekcja "headline")
+- short_description: 2-3 zdania na karty produktowe / listingi
+- bullet_points: 5-7 kluczowych punktow sprzedazowych (krotkie, z myślnikami)
+- claims_used: lista claimow uzytyych w opisie (stringi)
+- claims_warnings: lista ostrzezen (jesli sa)
+- complete_html: caly opis jako HTML (uzyj <h2>, <p>, <ul><li>, <strong>)
+- complete_text: caly opis jako plain text
+- summary: 1 zdanie podsumowania
+
+Dla KAZDEJ sekcji podaj:
+- section_name: klucz wewnetrzny
+- section_title: tytul w jezyku docelowym
+- content: tresc plain text
+- html_content: tresc w HTML
+
+Odpowiedz WYLACZNIE poprawnym JSON (bez markdown). Pola:
+product_name, species, lifestage, food_type, \
+language ("{target_language}"), language_name ("{target_language_name}"), \
+tone ("{tone}"), \
+headline, short_description, bullet_points (lista stringow), \
+sections (lista: [{{section_name, section_title, content, html_content}}]), \
+seo ({{meta_title, meta_description, keywords (lista), focus_keyword}}), \
+claims_used (lista stringow), \
+claims_warnings (lista: [{{claim_text, warning_type, explanation, recommendation}}]), \
+complete_html, complete_text, summary."""
+
+
+def build_product_description_from_image_prompt(
+    target_language: str,
+    target_language_name: str,
+    tone: str,
+) -> str:
+    """Build prompt for generating product description from a label image.
+
+    Two-phase prompt: extract product data from image, then generate
+    commercial description.
+
+    Args:
+        target_language: ISO 639-1 code.
+        target_language_name: Full language name.
+        tone: Description tone.
+
+    Returns:
+        Complete prompt string.
+    """
+    tone_instruction = _TONE_INSTRUCTIONS.get(tone, _TONE_INSTRUCTIONS["standard"])
+
+    return f"""\
+Jestes doswiadczonym copywriterem specjalizujacym sie w branzy pet food \
+z gleboka znajomoscia regulacji FEDIAF i EU 767/2009.
+
+FAZA 1 — EKSTRAKCJA DANYCH Z ETYKIETY:
+Na podstawie obrazu etykiety wyekstrahuj:
+- Nazwa produktu, marka
+- Gatunek docelowy (pies/kot/inny)
+- Etap zycia (szczenie/dorosly/senior)
+- Typ karmy (sucha/mokra/przysmak)
+- Lista skladnikow (z procentami jesli podane)
+- Skladniki analityczne (bialko, tluszcz, wlokno, wilgotnosc, popiol, wapn, fosfor)
+- Claimy widoczne na etykiecie
+- Unikalne cechy produktu (USP)
+
+FAZA 2 — GENERACJA OPISU KOMERCYJNEGO:
+Na podstawie wyekstrahowanych danych wygeneruj KOMPLETNY OPIS KOMERCYJNY \
+w jezyku: {target_language_name} ({target_language}).
+
+STYL OPISU:
+{tone_instruction}
+
+WYMAGANE SEKCJE (8 sekcji):
+
+1. HEADLINE (section_name: "headline") — 1 zdanie, chwytliwy hook, maks 15 slow.
+
+2. KEY BENEFITS (section_name: "key_benefits") — 3-5 zdan mapujacych \
+skladniki na korzysci (bialko→miesnie, omega→skora, blonnik→trawienie).
+
+3. INGREDIENT STORY (section_name: "ingredient_story") — 2-4 zdania \
+narracji o skladnikach i ich pochodzeniu.
+
+4. TARGET ANIMAL PROFILE (section_name: "target_animal_profile") — 2-3 zdania \
+dla kogo jest ta karma.
+
+5. NUTRITIONAL HIGHLIGHTS (section_name: "nutritional_highlights") — kluczowe \
+skladniki odzywcze z wyjasnieniem funkcji i wartosciami %.
+
+6. FEEDING SUMMARY (section_name: "feeding_summary") — 2-3 zdania uproszczonych \
+wskazowek dawkowania.
+
+7. CLAIMS & CERTIFICATIONS (section_name: "claims_certifications") — lista \
+uzasadnionych claimow.
+
+8. SEO METADATA (obiekt "seo"): meta_title (60 zn.), meta_description (160 zn.), \
+keywords (5-10), focus_keyword.
+
+GUARDRAILS REGULACYJNE:
+- Reguly nazewnictwa FEDIAF: "z X"=4%, "bogaty w X"=14%, X w nazwie=26%
+- ZAKAZANE claimy terapeutyczne (EU 767/2009 Art.13)
+- "Natural" tylko jesli wszystkie skladniki naturalne
+- "Grain-free" tylko jesli brak zboz w skladzie
+- "Hypoallergenic" wymaga rygorystycznego dowodu
+- Watpliwe claimy → claims_warnings
+
+Odpowiedz WYLACZNIE poprawnym JSON (bez markdown). Pola:
+product_name, species, lifestage, food_type, \
+language ("{target_language}"), language_name ("{target_language_name}"), \
+tone ("{tone}"), \
+headline, short_description (2-3 zdania), \
+bullet_points (5-7 punktow), \
+sections (lista: [{{section_name, section_title, content, html_content}}]), \
+seo ({{meta_title, meta_description, keywords, focus_keyword}}), \
+claims_used (lista), claims_warnings (lista: \
+[{{claim_text, warning_type, explanation, recommendation}}]), \
+complete_html, complete_text, summary."""
+
+
+PRODUCT_DESCRIPTION_VERIFY_PROMPT = """\
+Jestes recenzentem jakosci AI specjalizujacym sie w branzy pet food. \
+Otrzymujesz WYGENEROWANY OPIS PRODUKTU w formacie JSON.
+
+DANE WEJSCIOWE PRODUCENTA (ZRODLO PRAWDY):
+{input_data}
+
+Twoje zadanie: ZWERYFIKUJ opis porownujac go z DANYMI WEJSCIOWYMI. Szukaj:
+
+A) HALUCYNACJE SKLADNIKOWE — opis wspomina skladniki, ktore NIE sa \
+w danych wejsciowych (lista skladnikow). Usun lub popraw.
+
+B) HALUCYNACJE LICZBOWE — opis podaje wartosci procentowe lub liczbowe, \
+ktore NIE wynikaja z danych wejsciowych. Usun lub popraw.
+
+C) NIEUZASADNIONE CLAIMY — opis zawiera twierdzenia, ktore nie wynikaja \
+ze skladu (np. "bogaty w kurczaka" jesli kurczak nie jest na liscie \
+lub jest < 14%). Dodaj ostrzezenie w claims_warnings.
+
+D) ZAKAZANE CLAIMY TERAPEUTYCZNE — frazy sugerujace dzialanie lecznicze: \
+"leczy", "zapobiega chorobom", "terapeutyczny", "medyczny". \
+Zamien na dopuszczalne claimy funkcjonalne.
+
+E) PRZESADZONY JEZYK — twierdzenia bez pokrycia w danych: \
+"najlepszy na rynku", "jedyny taki", "gwarantuje zdrowie". Zlagodz.
+
+F) NIESPOJNOSC — opis mowi o innym gatunku/etapie zycia/typie karmy \
+niz dane wejsciowe. Popraw.
+
+Dla KAZDEGO elementu:
+- POROWNAJ z danymi wejsciowymi
+- Jesli element jest POPRAWNY i UZASADNIONY — zachowaj
+- Jesli element jest HALUCYNACJA — USUN lub POPRAW
+- Jesli claim jest watpliwy — dodaj do claims_warnings
+
+WAZNE: Badz SUROWY. Lepiej usunac watpliwy element niz zostawic halucynacje. \
+Priorytet: DOKLADNOSC > kreatywnosc.
+
+Zwroc POPRAWIONY wynik w IDENTYCZNYM formacie JSON jak wejscie \
+(te same pola, ta sama struktura).
+
+WYNIK DO WERYFIKACJI (JSON ponizej):"""
+
+
 # -- Label version comparison (diff) prompt ------------------------------------
 
 LABEL_DIFF_PROMPT = """\

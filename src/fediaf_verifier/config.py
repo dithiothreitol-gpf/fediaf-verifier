@@ -67,6 +67,9 @@ class AppSettings(BaseSettings):
     # Label text generation
     max_tokens_label_text: int = 12288
 
+    # Product description generation
+    max_tokens_product_desc: int = 16384
+
     # Per-market compliance check
     max_tokens_market: int = 12288
 

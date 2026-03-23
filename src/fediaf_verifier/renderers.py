@@ -17,6 +17,7 @@ from fediaf_verifier.export import (
     label_text_to_text,
     linguistic_to_text,
     market_check_to_text,
+    product_description_to_text,
     structure_to_text,
     to_json,
     to_text,
@@ -1504,6 +1505,191 @@ def render_label_text_report(result, filename: str) -> None:
                 "potem File > Scripts > Other Script > wybierz ten plik. "
                 "Doda warstw\u0119 z ramkami tekstowymi."
             ),
+        )
+
+
+# -- Render product description report ------------------------------------------------
+def render_product_description_report(result, filename: str) -> None:
+    """Render generated product description results."""
+    st.divider()
+
+    if not result.performed or not result.report:
+        st.error(
+            f"**Generowanie opisu nie powiod\u0142o si\u0119.**\n\n"
+            f"{result.error or 'Nieznany b\u0142\u0105d.'}"
+        )
+        return
+
+    r = result.report
+
+    TONE_LABELS = {
+        "premium": "Premium",
+        "scientific": "Naukowy",
+        "natural": "Naturalny",
+        "standard": "Standardowy",
+    }
+
+    # Human review warning
+    _has_claim_warnings = bool(r.claims_warnings)
+    if _has_claim_warnings:
+        st.markdown(
+            '<div class="status-banner status-warn">'
+            "\u26a0\ufe0f <strong>Opis wymaga przej\u015bcia przez specjalist\u0119"
+            "</strong> \u2014 wykryto "
+            f"{len(r.claims_warnings)} ostrze\u017ce\u0144 "
+            "dotycz\u0105cych claim\u00f3w marketingowych."
+            "</div>",
+            unsafe_allow_html=True,
+        )
+    else:
+        st.success(
+            f"\u2705 Opis produktu wygenerowany \u2014 "
+            f"{_esc(r.language_name)} ({r.language}), "
+            f"styl: {TONE_LABELS.get(r.tone, r.tone)}"
+        )
+
+    st.info(
+        "\U0001f4cb **Uwaga:** Opis wygenerowany przez AI przeszed\u0142 "
+        "weryfikacj\u0119 krzy\u017cow\u0105 (reflection step) i "
+        "deterministyczn\u0105 walidacj\u0119 claim\u00f3w. "
+        "Mimo to **wymagany jest przegl\u0105d cz\u0142owieka** przed "
+        "publikacj\u0105 \u2014 szczeg\u00f3lnie claim\u00f3w marketingowych "
+        "i danych liczbowych.",
+        icon="\u26a0\ufe0f",
+    )
+
+    # Metrics
+    mc1, mc2, mc3, mc4 = st.columns(4)
+    mc1.metric("Produkt", r.product_name or "\u2014")
+    mc2.metric("J\u0119zyk", r.language_name)
+    mc3.metric("Styl", TONE_LABELS.get(r.tone, r.tone))
+    mc4.metric("Sekcje", str(len(r.sections)))
+
+    if r.summary:
+        st.caption(r.summary)
+
+    # Tabs
+    tab_full, tab_short, tab_bullets, tab_seo, tab_html = st.tabs([
+        "Pe\u0142ny opis",
+        "Kr\u00f3tki opis",
+        "Bullet Points",
+        "SEO",
+        "HTML",
+    ])
+
+    with tab_full:
+        if r.sections:
+            for sec in r.sections:
+                with st.expander(
+                    f"\U0001f4c4 {_esc(sec.section_title or sec.section_name)}",
+                    expanded=True,
+                ):
+                    st.markdown(sec.content)
+
+        if r.complete_text:
+            st.subheader("Pe\u0142ny tekst (kopiowanie)")
+            st.code(r.complete_text, language=None)
+
+    with tab_short:
+        if r.short_description:
+            st.info(r.short_description)
+        else:
+            st.caption("Brak kr\u00f3tkiego opisu.")
+
+    with tab_bullets:
+        if r.bullet_points:
+            for bp in r.bullet_points:
+                st.markdown(f"- {_esc(bp)}")
+        else:
+            st.caption("Brak punkt\u00f3w sprzeda\u017cowych.")
+
+    with tab_seo:
+        if r.seo:
+            seo = r.seo
+            st.markdown(f"**Meta title** ({len(seo.meta_title)}/60 zn.):")
+            st.code(seo.meta_title, language=None)
+            st.markdown(
+                f"**Meta description** ({len(seo.meta_description)}/160 zn.):"
+            )
+            st.code(seo.meta_description, language=None)
+            if seo.focus_keyword:
+                st.markdown(f"**Focus keyword:** {_esc(seo.focus_keyword)}")
+            if seo.keywords:
+                st.markdown(
+                    "**Keywords:** " + ", ".join(f"`{_esc(k)}`" for k in seo.keywords)
+                )
+        else:
+            st.caption("Brak metadanych SEO.")
+
+    with tab_html:
+        if r.complete_html:
+            st.subheader("Podgl\u0105d")
+            st.markdown(r.complete_html, unsafe_allow_html=True)
+            st.subheader("Kod \u017ar\u00f3d\u0142owy")
+            st.code(r.complete_html, language="html")
+        else:
+            st.caption("Brak wersji HTML.")
+
+    # Claims warnings
+    if r.claims_warnings:
+        st.divider()
+        st.subheader(
+            f"\u26a0\ufe0f Ostrze\u017cenia dotycz\u0105ce claim\u00f3w "
+            f"({len(r.claims_warnings)})"
+        )
+        WARNING_TYPE_LABELS = {
+            "forbidden_therapeutic": "\u26d4 Zakazany claim terapeutyczny",
+            "unsubstantiated": "\u26a0\ufe0f Brak uzasadnienia",
+            "naming_rule_violation": "\u26a0\ufe0f Naruszenie regu\u0142y nazewnictwa",
+            "needs_evidence": "\U0001f4cb Wymaga dowodu",
+        }
+        for cw in r.claims_warnings:
+            wt_label = WARNING_TYPE_LABELS.get(
+                cw.warning_type, cw.warning_type.upper()
+            )
+            st.warning(
+                f"**{wt_label}:** {_esc(cw.claim_text)}\n\n"
+                f"{_esc(cw.explanation)}\n\n"
+                f"\u2192 {_esc(cw.recommendation)}"
+            )
+
+    # Claims used
+    if r.claims_used:
+        with st.expander(
+            f"\u2713 Claimy u\u017cyte w opisie ({len(r.claims_used)})",
+            expanded=False,
+        ):
+            for c in r.claims_used:
+                st.markdown(f"- {_esc(c)}")
+
+    # Export
+    st.divider()
+    stem = Path(filename).stem if filename else "opis_produktu"
+
+    col_a, col_b, col_c = st.columns(3)
+    with col_a:
+        st.download_button(
+            "\u2b07\ufe0f Opis (TXT)",
+            data=product_description_to_text(result, filename),
+            file_name=f"opis_{stem}.txt",
+            mime="text/plain",
+            use_container_width=True,
+        )
+    with col_b:
+        st.download_button(
+            "\u2b07\ufe0f Opis (HTML)",
+            data=r.complete_html or r.complete_text,
+            file_name=f"opis_{stem}.html",
+            mime="text/html",
+            use_container_width=True,
+        )
+    with col_c:
+        st.download_button(
+            "\u2b07\ufe0f Opis (JSON)",
+            data=r.model_dump_json(indent=2, exclude_none=True),
+            file_name=f"opis_{stem}.json",
+            mime="application/json",
+            use_container_width=True,
         )
 
 

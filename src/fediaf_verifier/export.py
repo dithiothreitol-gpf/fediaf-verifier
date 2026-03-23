@@ -11,6 +11,7 @@ from fediaf_verifier.models import (
     LabelTextResult,
     LinguisticCheckResult,
     MarketCheckResult,
+    ProductDescriptionResult,
     TranslationResult,
 )
 
@@ -832,6 +833,138 @@ def label_text_to_text(result: LabelTextResult, product_name: str = "") -> str:
     lines.extend([
         "=" * 60,
         "Tekst wygenerowany automatycznie. BULT Quality Assurance.",
+        "=" * 60,
+    ])
+
+    return "\n".join(lines)
+
+
+def product_description_to_text(
+    result: ProductDescriptionResult, product_name: str = "",
+) -> str:
+    """Format generated product description as human-readable text."""
+    lines = [
+        "=" * 60,
+        "WYGENEROWANY OPIS PRODUKTU",
+        "BULT Quality Assurance",
+        "=" * 60,
+    ]
+    if product_name:
+        lines.append(f"Produkt: {product_name}")
+    lines.append("")
+
+    if not result.performed or not result.report:
+        lines.append(
+            f"Generowanie nie powiodlo sie: {result.error or 'nieznany blad'}"
+        )
+        return "\n".join(lines)
+
+    r = result.report
+
+    TONE_LABELS = {
+        "premium": "Premium / Luksusowy",
+        "scientific": "Naukowy / Weterynaryjny",
+        "natural": "Naturalny / Wholesome",
+        "standard": "Standardowy / Neutralny",
+    }
+    lines.extend([
+        f"Jezyk: {r.language_name} ({r.language})",
+        f"Gatunek: {r.species}",
+        f"Etap zycia: {r.lifestage}",
+        f"Typ karmy: {r.food_type}",
+        f"Styl: {TONE_LABELS.get(r.tone, r.tone)}",
+        "",
+    ])
+
+    # Headline
+    if r.headline:
+        lines.append("HEADLINE:")
+        lines.append(f"  {r.headline}")
+        lines.append("")
+
+    # Short description
+    if r.short_description:
+        lines.append("KROTKI OPIS (do kart produktowych):")
+        lines.append("-" * 40)
+        for ln in r.short_description.splitlines():
+            lines.append(f"  {ln}")
+        lines.append("")
+
+    # Bullet points
+    if r.bullet_points:
+        lines.append(f"KLUCZOWE PUNKTY SPRZEDAZOWE ({len(r.bullet_points)}):")
+        lines.append("-" * 40)
+        for bp in r.bullet_points:
+            lines.append(f"  - {bp}")
+        lines.append("")
+
+    # Sections
+    if r.sections:
+        for sec in r.sections:
+            lines.append("-" * 60)
+            lines.append(f"SEKCJA: {sec.section_title}")
+            lines.append("-" * 60)
+            for ln in sec.content.splitlines():
+                lines.append(f"  {ln}")
+            lines.append("")
+
+    # SEO metadata
+    if r.seo:
+        lines.append("SEO METADATA:")
+        lines.append("-" * 40)
+        if r.seo.meta_title:
+            lines.append(f"  Meta title: {r.seo.meta_title}")
+        if r.seo.meta_description:
+            lines.append(f"  Meta description: {r.seo.meta_description}")
+        if r.seo.focus_keyword:
+            lines.append(f"  Focus keyword: {r.seo.focus_keyword}")
+        if r.seo.keywords:
+            lines.append(f"  Keywords: {', '.join(r.seo.keywords)}")
+        lines.append("")
+
+    # Claims used
+    if r.claims_used:
+        lines.append(f"UZYTE CLAIMY ({len(r.claims_used)}):")
+        for c in r.claims_used:
+            lines.append(f"  + {c}")
+        lines.append("")
+
+    # Claims warnings
+    if r.claims_warnings:
+        WARNING_TYPE_MAP = {
+            "forbidden_therapeutic": "ZAKAZANY CLAIM TERAPEUTYCZNY",
+            "unsubstantiated": "BRAK UZASADNIENIA",
+            "naming_rule_violation": "NARUSZENIE REGULY NAZEWNICTWA",
+            "needs_evidence": "WYMAGA DOWODU",
+        }
+        lines.append(f"OSTRZEZENIA CLAIMOW ({len(r.claims_warnings)}):")
+        lines.append("-" * 40)
+        for cw in r.claims_warnings:
+            wt = WARNING_TYPE_MAP.get(cw.warning_type, cw.warning_type.upper())
+            lines.append(f"  ! [{wt}] {cw.claim_text}")
+            if cw.explanation:
+                lines.append(f"    Wyjasnienie: {cw.explanation}")
+            if cw.recommendation:
+                lines.append(f"    -> {cw.recommendation}")
+        lines.append("")
+
+    # Complete text
+    if r.complete_text:
+        lines.append("=" * 60)
+        lines.append("PELNY OPIS PRODUKTU:")
+        lines.append("=" * 60)
+        for ln in r.complete_text.splitlines():
+            lines.append(ln)
+        lines.append("")
+
+    # Summary
+    if r.summary:
+        lines.append(f"Podsumowanie: {r.summary}")
+        lines.append("")
+
+    lines.extend([
+        "=" * 60,
+        "Opis wygenerowany automatycznie. BULT Quality Assurance.",
         "=" * 60,
     ])
 

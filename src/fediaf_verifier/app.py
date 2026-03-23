@@ -17,6 +17,7 @@ from fediaf_verifier.providers import AIProvider
 from fediaf_verifier.verifier import (
     create_providers,
     generate_label_text,
+    generate_product_description,
     verify_claims,
     verify_design_analysis,
     verify_ean,
@@ -228,6 +229,7 @@ _MODE_CLAIMS = "\u2713 Walidator claim\u00f3w"
 _MODE_MARKET = "\U0001f30d Walidator rynkowy"
 _MODE_LABEL_TEXT = "\U0001f4dd Generator tekstu etykiety"
 _MODE_DIFF = "\U0001f504 Por\u00f3wnanie wersji"
+_MODE_PRODUCT_DESC = "\U0001f4dd Generator opis\u00f3w produkt\u00f3w"
 
 _TRANSLATION_LANGUAGES = {
     "en": "English",
@@ -272,7 +274,7 @@ with st.sidebar:
     elif _mode_group == _GROUP_TOOLS:
         verification_mode = st.selectbox(
             "Narz\u0119dzie",
-            [_MODE_TRANSLATION, _MODE_LABEL_TEXT, _MODE_DIFF, _MODE_EAN],
+            [_MODE_TRANSLATION, _MODE_LABEL_TEXT, _MODE_PRODUCT_DESC, _MODE_DIFF, _MODE_EAN],
             label_visibility="collapsed",
         )
     else:
@@ -288,6 +290,7 @@ with st.sidebar:
     is_market_check = verification_mode == _MODE_MARKET
     is_label_text_gen = verification_mode == _MODE_LABEL_TEXT
     is_diff_check = verification_mode == _MODE_DIFF
+    is_product_desc = verification_mode == _MODE_PRODUCT_DESC
 
     # -- Mode-specific options --
     st.divider()
@@ -298,6 +301,10 @@ with st.sidebar:
     _translation_notes = ""
     _market_target_code = ""
     _market_target_name = ""
+    _pd_input_mode = "manual"
+    _pd_tone = "standard"
+    _pd_target_lang = "en"
+    _pd_target_name = "English"
 
     if is_market_check:
         from fediaf_verifier.market_rules import MARKET_RULES as _MR
@@ -331,7 +338,40 @@ with st.sidebar:
             "zachowaj styl formalny...",
         )
 
-    elif not is_linguistic_only and not is_structure_check and not is_design_analysis and not is_ean_check and not is_claims_check and not is_market_check and not is_label_text_gen and not is_diff_check:
+    elif is_product_desc:
+        st.subheader("Opcje opisu produktu")
+        _pd_input_mode = st.radio(
+            "Tryb wprowadzania",
+            ["manual", "image"],
+            format_func=lambda x: {
+                "manual": "R\u0119czne dane",
+                "image": "Z etykiety (obraz/PDF)",
+            }[x],
+            horizontal=True,
+        )
+        _pd_tone = st.selectbox(
+            "Styl opisu",
+            ["premium", "scientific", "natural", "standard"],
+            format_func=lambda x: {
+                "premium": "Premium / Luksusowy",
+                "scientific": "Naukowy / Weterynaryjny",
+                "natural": "Naturalny / Wholesome",
+                "standard": "Standardowy / Neutralny",
+            }[x],
+        )
+        _pd_lang_display = [
+            f"{name} ({code})"
+            for code, name in _TRANSLATION_LANGUAGES.items()
+        ]
+        _pd_lang_selection = st.selectbox(
+            "J\u0119zyk opisu", _pd_lang_display, key="pd_lang"
+        )
+        _pd_lang_idx = _pd_lang_display.index(_pd_lang_selection)
+        _pd_lang_codes = list(_TRANSLATION_LANGUAGES.keys())
+        _pd_target_lang = _pd_lang_codes[_pd_lang_idx]
+        _pd_target_name = list(_TRANSLATION_LANGUAGES.values())[_pd_lang_idx]
+
+    elif not is_linguistic_only and not is_structure_check and not is_design_analysis and not is_ean_check and not is_claims_check and not is_market_check and not is_label_text_gen and not is_diff_check and not is_product_desc:
         # Full verification mode — market selector
         market_selection = st.selectbox(
             "Rynek docelowy",
@@ -345,7 +385,7 @@ with st.sidebar:
             None if market_selection == MARKETS[0] else market_selection
         )
 
-    if not is_linguistic_only and not is_structure_check and not is_translation and not is_design_analysis and not is_ean_check and not is_claims_check and not is_market_check and not is_label_text_gen and not is_diff_check:
+    if not is_linguistic_only and not is_structure_check and not is_translation and not is_design_analysis and not is_ean_check and not is_claims_check and not is_market_check and not is_label_text_gen and not is_diff_check and not is_product_desc:
         st.divider()
 
         pdf_path = settings.fediaf_pdf_path
@@ -400,6 +440,15 @@ prostok\u0105tami (dost\u0119pna dla plik\u00f3w PDF i obraz\u00f3w)
 2. **Kliknij "Sprawd\u017a j\u0119zyk"** \u2014 analiza trwa 10\u201320 sekund
 3. **Przejrzyj wynik** \u2014 lista b\u0142\u0119d\u00f3w z sugestiami poprawek
 4. **Pobierz raport TXT** \u2014 do wydruku lub przekazania grafikowi
+""")
+        elif is_product_desc:
+            st.markdown("""\
+1. **Wybierz tryb** \u2014 "R\u0119czne dane" (formularz) lub "Z etykiety" (obraz/PDF)
+2. **Ustaw styl i j\u0119zyk** \u2014 Premium, Naukowy, Naturalny lub Standardowy
+3. **Wprowad\u017a dane / wgraj etykiet\u0119**
+4. **Kliknij "Generuj opis"** \u2014 generacja trwa 30\u201360 sekund
+5. **Przejrzyj wynik** \u2014 pe\u0142ny opis, kr\u00f3tki opis, bullet points, SEO, HTML
+6. **Pobierz** \u2014 TXT, HTML lub JSON
 """)
         else:
             st.markdown("""\
@@ -1041,6 +1090,9 @@ if is_diff_check:
 elif is_label_text_gen:
     # Label text mode does not use file uploader — uses form instead
     uploaded = None
+elif is_product_desc and _pd_input_mode == "manual":
+    # Product description manual mode — uses form instead of file uploader
+    uploaded = None
 else:
     uploaded = st.file_uploader(
         "Wgraj etykiet\u0119 produktu",
@@ -1186,6 +1238,97 @@ if is_label_text_gen:
             "crude_ash": _lt_ash,
             "calcium": _lt_calcium,
             "phosphorus": _lt_phosphorus,
+        },
+    }
+
+
+# -- Product description form (manual mode) ----------------------------------------
+_product_desc_form_data = {}
+if is_product_desc and _pd_input_mode == "manual":
+    st.subheader("Generator opis\u00f3w produkt\u00f3w")
+
+    _pd_species = st.selectbox(
+        "Gatunek", ["dog", "cat"],
+        format_func=lambda x: {"dog": "Pies", "cat": "Kot"}[x],
+        key="pd_species",
+    )
+    _pd_c1, _pd_c2 = st.columns(2)
+    with _pd_c1:
+        _pd_lifestage = st.selectbox(
+            "Etap \u017cycia",
+            ["adult", "puppy", "kitten", "senior", "all_stages"],
+            format_func=lambda x: {
+                "adult": "Doros\u0142y", "puppy": "Szczeni\u0119",
+                "kitten": "Koci\u0119", "senior": "Senior",
+                "all_stages": "Wszystkie etapy",
+            }[x],
+            key="pd_lifestage",
+        )
+    with _pd_c2:
+        _pd_food_type = st.selectbox(
+            "Typ karmy",
+            ["dry", "wet", "semi_moist", "treat"],
+            format_func=lambda x: {
+                "dry": "Sucha", "wet": "Mokra",
+                "semi_moist": "P\u00f3\u0142wilgotna", "treat": "Przysmak",
+            }[x],
+            key="pd_food_type",
+        )
+
+    _pd_product_name = st.text_input(
+        "Nazwa produktu",
+        placeholder="np. Premium Adult Dog Chicken & Rice",
+        key="pd_product_name",
+    )
+    _pd_brand = st.text_input(
+        "Marka",
+        placeholder="np. BULT Nutrition",
+        key="pd_brand",
+    )
+    _pd_ingredients = st.text_area(
+        "Sk\u0142adniki (lista sk\u0142adu)",
+        height=120,
+        placeholder="np. mi\u0119so z kurczaka (30%), ry\u017c (20%), t\u0142uszcz drobiowy...",
+        key="pd_ingredients",
+    )
+    _pd_usps = st.text_area(
+        "Unikalne cechy produktu (USP)",
+        height=80,
+        placeholder="np. receptura opracowana z weterynarzami, "
+        "sk\u0142adniki z lokalnych farm, bez sztucznych konserwant\u00f3w...",
+        key="pd_usps",
+    )
+
+    st.markdown("**Sk\u0142adniki analityczne (%):**")
+    _pn_c1, _pn_c2, _pn_c3, _pn_c4 = st.columns(4)
+    with _pn_c1:
+        _pd_protein = st.number_input("Bia\u0142ko", min_value=0.0, max_value=100.0, value=0.0, step=0.1, key="pd_protein")
+        _pd_calcium = st.number_input("Wap\u0144", min_value=0.0, max_value=100.0, value=0.0, step=0.01, key="pd_calcium")
+    with _pn_c2:
+        _pd_fat = st.number_input("T\u0142uszcz", min_value=0.0, max_value=100.0, value=0.0, step=0.1, key="pd_fat")
+        _pd_phosphorus = st.number_input("Fosfor", min_value=0.0, max_value=100.0, value=0.0, step=0.01, key="pd_phosphorus")
+    with _pn_c3:
+        _pd_fibre = st.number_input("W\u0142\u00f3kno", min_value=0.0, max_value=100.0, value=0.0, step=0.1, key="pd_fibre")
+    with _pn_c4:
+        _pd_moisture = st.number_input("Wilgotno\u015b\u0107", min_value=0.0, max_value=100.0, value=0.0, step=0.1, key="pd_moisture")
+        _pd_ash = st.number_input("Popi\u00f3\u0142", min_value=0.0, max_value=100.0, value=0.0, step=0.1, key="pd_ash")
+
+    _product_desc_form_data = {
+        "species": _pd_species,
+        "lifestage": _pd_lifestage,
+        "food_type": _pd_food_type,
+        "product_name": _pd_product_name,
+        "brand": _pd_brand,
+        "ingredients": _pd_ingredients,
+        "usps": _pd_usps,
+        "nutrients": {
+            "crude_protein": _pd_protein,
+            "crude_fat": _pd_fat,
+            "crude_fibre": _pd_fibre,
+            "moisture": _pd_moisture,
+            "crude_ash": _pd_ash,
+            "calcium": _pd_calcium,
+            "phosphorus": _pd_phosphorus,
         },
     }
 
@@ -1521,6 +1664,59 @@ def _run_label_text(form_data: dict) -> None:
     st.session_state.report_market = None
 
 
+def _run_product_description(form_data: dict | None, uploaded_file=None) -> None:
+    tone_labels = {
+        "premium": "Premium", "scientific": "Naukowy",
+        "natural": "Naturalny", "standard": "Standardowy",
+    }
+    tone_name = tone_labels.get(_pd_tone, _pd_tone)
+    with st.spinner(
+        f"Generuj\u0119 opis produktu ({_pd_target_name}, {tone_name})... "
+        "(ok. 30\u201360 sekund)"
+    ):
+        try:
+            label_b64 = ""
+            media_type = ""
+            if uploaded_file is not None:
+                uploaded_file.seek(0)
+                label_b64, media_type = file_to_base64(
+                    uploaded_file.read(), uploaded_file.name
+                )
+
+            result = generate_product_description(
+                provider=secondary_provider,
+                settings=settings,
+                target_language=_pd_target_lang,
+                target_language_name=_pd_target_name,
+                tone=_pd_tone,
+                species=form_data.get("species", "") if form_data else "",
+                lifestage=form_data.get("lifestage", "") if form_data else "",
+                food_type=form_data.get("food_type", "") if form_data else "",
+                ingredients=form_data.get("ingredients", "") if form_data else "",
+                nutrients=form_data.get("nutrients") if form_data else None,
+                product_name=form_data.get("product_name", "") if form_data else "",
+                usps=form_data.get("usps", "") if form_data else "",
+                brand=form_data.get("brand", "") if form_data else "",
+                label_b64=label_b64,
+                media_type=media_type,
+            )
+        except FediafVerifierError as e:
+            st.error(f"**B\u0142\u0105d API:** {e}")
+            return
+        except Exception as e:
+            st.error(f"**Nieoczekiwany b\u0142\u0105d:** {e}")
+            logger.exception("Unexpected error during product description generation")
+            return
+
+    st.session_state.report = result
+    st.session_state.report_filename = (
+        uploaded_file.name if uploaded_file
+        else (form_data.get("product_name", "") if form_data else "")
+        or "opis_produktu"
+    )
+    st.session_state.report_market = None
+
+
 def _run_diff_check(old_file, new_file) -> None:
     with st.spinner(
         "Por\u00f3wnuj\u0119 wersje etykiety... (ok. 20\u201340 sekund)"
@@ -1589,6 +1785,16 @@ if is_label_text_gen and _label_text_form_data.get("ingredients", "").strip() an
 ):
     _run_label_text(_label_text_form_data)
 
+if is_product_desc and _pd_input_mode == "manual" and _product_desc_form_data.get("ingredients", "").strip() and st.button(
+    "Generuj opis produktu", type="primary", use_container_width=True
+):
+    _run_product_description(_product_desc_form_data)
+
+if is_product_desc and _pd_input_mode == "image" and uploaded and st.button(
+    "Generuj opis produktu z etykiety", type="primary", use_container_width=True
+):
+    _run_product_description(None, uploaded)
+
 if is_diff_check and uploaded_old and uploaded_new and st.button(
     "Por\u00f3wnaj wersje", type="primary", use_container_width=True
 ):
@@ -1614,7 +1820,7 @@ if uploaded and is_linguistic_only and st.button(
 ):
     _run_linguistic_only(uploaded)
 
-if uploaded and not is_linguistic_only and not is_structure_check and not is_translation and not is_design_analysis and not is_ean_check and not is_claims_check and not is_market_check and not is_label_text_gen and not is_diff_check and st.button(
+if uploaded and not is_linguistic_only and not is_structure_check and not is_translation and not is_design_analysis and not is_ean_check and not is_claims_check and not is_market_check and not is_label_text_gen and not is_diff_check and not is_product_desc and st.button(
     "Sprawd\u017a etykiet\u0119", type="primary", use_container_width=True
 ):
     _run_verification(uploaded, selected_market)
@@ -1629,6 +1835,7 @@ from fediaf_verifier.renderers import (
     render_label_text_report,
     render_linguistic_report,
     render_market_report,
+    render_product_description_report,
     render_report,
     render_structure_report,
     render_translation_report,
@@ -1646,6 +1853,8 @@ if st.session_state.report is not None:
         render_market_report(report, st.session_state.report_filename)
     elif _report_type == "LabelTextResult":
         render_label_text_report(report, st.session_state.report_filename)
+    elif _report_type == "ProductDescriptionResult":
+        render_product_description_report(report, st.session_state.report_filename)
     elif _report_type == "LabelDiffResult":
         render_diff_report(
             report,

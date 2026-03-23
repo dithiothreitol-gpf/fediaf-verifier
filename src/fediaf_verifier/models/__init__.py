@@ -48,6 +48,13 @@ from .market_trends import MarketTrends, Positioning
 from .translation import TranslatedSection, TranslationReport, TranslationResult
 from .nutrients import NUTRIENT_FIELDS, NutrientsOnly, NutrientValues
 from .packaging import PackagingCheck, ProductClassification
+from .product_description import (
+    ClaimWarning,
+    ProductDescriptionReport,
+    ProductDescriptionResult,
+    ProductDescriptionSection,
+    SEOMetadata,
+)
 from .product import FoodType, Lifestage, Product, Species
 from .report import (
     ComplianceStatus,
@@ -59,6 +66,7 @@ from .report import (
 __all__ = [
     "NUTRIENT_FIELDS",
     "ClaimValidation",
+    "ClaimWarning",
     "ClaimsCheckReport",
     "ClaimsCheckResult",
     "CompetitiveBenchmark",
@@ -105,8 +113,12 @@ __all__ = [
     "PackagingCheck",
     "Positioning",
     "Product",
+    "ProductDescriptionReport",
+    "ProductDescriptionResult",
+    "ProductDescriptionSection",
     "ProductClassification",
     "QRCodeResult",
+    "SEOMetadata",
     "SecondaryCheck",
     "Severity",
     "Species",

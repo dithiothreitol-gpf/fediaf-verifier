@@ -36,8 +36,11 @@ from fediaf_verifier.prompts import (
     LINGUISTIC_ONLY_PROMPT,
     SECONDARY_CHECK_PROMPT,
     SELF_VERIFY_PROMPT,
+    PRODUCT_DESCRIPTION_VERIFY_PROMPT,
     build_label_text_prompt,
     build_market_check_prompt,
+    build_product_description_from_image_prompt,
+    build_product_description_prompt,
     build_translation_prompt,
 )
 from fediaf_verifier.providers import (
@@ -460,6 +463,414 @@ def generate_label_text(
         return LabelTextResult(
             performed=False,
             error=f"Blad generowania tekstu etykiety: {e}",
+        )
+
+
+def _validate_product_description_claims(
+    report: "ProductDescriptionReport",
+    ingredients: str,
+    nutrients: dict | None,
+) -> list["ClaimWarning"]:
+    """Deterministic claim validation — Python hard rules, no AI.
+
+    Checks the generated description against input data and FEDIAF/EU rules.
+    Returns additional ClaimWarning objects to append to the report.
+    """
+    from fediaf_verifier.models.product_description import ClaimWarning
+
+    warnings: list[ClaimWarning] = []
+    ingredients_lower = ingredients.lower() if ingredients else ""
+    full_text_lower = (report.complete_text or "").lower()
+
+    # -- 1. Grain-free claim check -----------------------------------------------
+    GRAIN_KEYWORDS = [
+        "pszenica", "wheat", "jeczmien", "jęczmień", "barley",
+        "owies", "oat", "zyto", "żyto", "rye",
+        "kukurydza", "corn", "maize",
+        "ryz", "ryż", "rice",
+        "proso", "millet", "sorgo", "sorghum",
+        "orkisz", "spelt",
+        "cereals", "grains", "zboza", "zboża", "zboze", "zboże",
+    ]
+    claims_text = " ".join(report.claims_used or []).lower()
+    grain_free_claimed = any(
+        phrase in full_text_lower or phrase in claims_text
+        for phrase in [
+            "grain-free", "grain free", "bez zboz", "bez zbóż",
+            "bezzbozow", "bezzbożow",
+        ]
+    )
+    if grain_free_claimed:
+        grains_found = [g for g in GRAIN_KEYWORDS if g in ingredients_lower]
+        if grains_found:
+            warnings.append(ClaimWarning(
+                claim_text="grain-free / bez zbóż",
+                warning_type="naming_rule_violation",
+                explanation=(
+                    f"Opis zawiera claim 'bez zbóż' ale w składnikach "
+                    f"wykryto: {', '.join(grains_found)}"
+                ),
+                recommendation="Usuń claim 'grain-free' lub popraw skład.",
+            ))
+
+    # -- 2. Therapeutic / medicinal claim check ----------------------------------
+    FORBIDDEN_THERAPEUTIC = [
+        "leczy", "wyleczy", "zapobiega chorobom", "likwiduje",
+        "eliminuje choroby", "terapeutycz", "lecznic", "medyczn",
+        "zastepuje leczenie", "cures", "treats disease", "prevents disease",
+        "therapeutic", "medicinal",
+    ]
+    for phrase in FORBIDDEN_THERAPEUTIC:
+        if phrase in full_text_lower:
+            warnings.append(ClaimWarning(
+                claim_text=phrase,
+                warning_type="forbidden_therapeutic",
+                explanation=(
+                    f"Opis zawiera zakazany claim terapeutyczny: '{phrase}'. "
+                    "EU 767/2009 Art.13 zabrania claimów leczniczych."
+                ),
+                recommendation=(
+                    "Zamień na claim funkcjonalny, np. 'wspiera trawienie' "
+                    "zamiast 'leczy problemy trawienne'."
+                ),
+            ))
+
+    # -- 3. "Natural" claim check ------------------------------------------------
+    SYNTHETIC_INDICATORS = [
+        "syntetycz", "synthetic", "artificial", "sztuczn",
+        "e-", "e1", "e2", "e3", "e4", "e5", "e6", "e7", "e8", "e9",
+        "bha", "bht", "etoksychin", "ethoxyquin",
+    ]
+    natural_claimed = any(
+        w in full_text_lower or w in claims_text
+        for w in ["natural", "naturaln", "naturale", "natürlich"]
+    )
+    if natural_claimed and ingredients_lower:
+        synthetics_found = [
+            s for s in SYNTHETIC_INDICATORS if s in ingredients_lower
+        ]
+        if synthetics_found:
+            warnings.append(ClaimWarning(
+                claim_text="natural / naturalny",
+                warning_type="needs_evidence",
+                explanation=(
+                    f"Claim 'natural' może wymagać zastrzeżenia — "
+                    f"w składnikach wykryto potencjalnie syntetyczne: "
+                    f"{', '.join(synthetics_found)}"
+                ),
+                recommendation=(
+                    "Dodaj zastrzeżenie: 'z dodanymi witaminami i minerałami' "
+                    "lub usuń claim 'natural'."
+                ),
+            ))
+
+    # -- 4. Percentage-based naming rule check (FEDIAF 4%/14%/26%) ---------------
+    import re
+
+    # Check claims_used for "bogaty w X" / "rich in X" patterns
+    # Use Unicode-aware regex for Polish characters
+    _INGR_PCT_RE = re.compile(
+        r'([\w\u0080-\u024F][\w\u0080-\u024F\s]*?)\s*\(?\s*(\d+(?:[.,]\d+)?)\s*%'
+    )
+
+    def _stem_match(ingredient_name: str, claim_text: str) -> bool:
+        """Check if ingredient name (or its stem) appears in claim text.
+
+        Handles Polish/German/etc. declensions by matching the first 4+ chars.
+        E.g. 'łosoś' matches 'łososia', 'kurczak' matches 'kurczaka'.
+        """
+        if not ingredient_name or len(ingredient_name) < 3:
+            return ingredient_name in claim_text
+        # Try full name first
+        if ingredient_name in claim_text:
+            return True
+        # Try stem (first N chars, min 4)
+        stem_len = max(4, len(ingredient_name) - 2)
+        stem = ingredient_name[:stem_len]
+        return stem in claim_text
+
+    for claim in (report.claims_used or []):
+        claim_lower = claim.lower()
+
+        # "bogaty w X" / "rich in X" → needs 14%
+        if any(p in claim_lower for p in ["bogat", "rich in", "reich an"]):
+            for ingredient_match in _INGR_PCT_RE.finditer(ingredients):
+                ingr_name = ingredient_match.group(1).strip().lower()
+                ingr_pct = float(ingredient_match.group(2).replace(",", "."))
+                if _stem_match(ingr_name, claim_lower) and ingr_pct < 14:
+                    warnings.append(ClaimWarning(
+                        claim_text=claim,
+                        warning_type="naming_rule_violation",
+                        explanation=(
+                            f"Claim '{claim}' wymaga min. 14% składnika "
+                            f"wg FEDIAF, ale podano {ingr_pct}%."
+                        ),
+                        recommendation=(
+                            f"Zmień na 'z {ingr_name}' (wymaga min. 4%) "
+                            f"lub zwiększ udział do 14%."
+                        ),
+                    ))
+
+        # "z X" / "with X" → needs 4%
+        elif any(p in claim_lower for p in ["z ", "with ", "mit "]):
+            for ingredient_match in _INGR_PCT_RE.finditer(ingredients):
+                ingr_name = ingredient_match.group(1).strip().lower()
+                ingr_pct = float(ingredient_match.group(2).replace(",", "."))
+                if _stem_match(ingr_name, claim_lower) and ingr_pct < 4:
+                    warnings.append(ClaimWarning(
+                        claim_text=claim,
+                        warning_type="naming_rule_violation",
+                        explanation=(
+                            f"Claim '{claim}' wymaga min. 4% składnika "
+                            f"wg FEDIAF, ale podano {ingr_pct}%."
+                        ),
+                        recommendation="Usuń claim lub zwiększ udział do 4%.",
+                    ))
+
+    # -- 5. Species/lifestage consistency check ----------------------------------
+    if report.species and ingredients:
+        # If report says "cat" but description mentions dog-specific things
+        species_lower = report.species.lower()
+        if "cat" in species_lower or "kot" in species_lower:
+            dog_words = ["dla psow", "for dogs", "für hunde", "pour chiens"]
+            for dw in dog_words:
+                if dw in full_text_lower:
+                    warnings.append(ClaimWarning(
+                        claim_text=f"Gatunek: {report.species}",
+                        warning_type="unsubstantiated",
+                        explanation=(
+                            f"Opis jest dla kota ale zawiera zwrot '{dw}' "
+                            "odnoszący się do psów."
+                        ),
+                        recommendation="Popraw opis — usuń odniesienia do psów.",
+                    ))
+        elif "dog" in species_lower or "pies" in species_lower:
+            cat_words = ["dla kotow", "for cats", "für katzen", "pour chats"]
+            for cw in cat_words:
+                if cw in full_text_lower:
+                    warnings.append(ClaimWarning(
+                        claim_text=f"Gatunek: {report.species}",
+                        warning_type="unsubstantiated",
+                        explanation=(
+                            f"Opis jest dla psa ale zawiera zwrot '{cw}' "
+                            "odnoszący się do kotów."
+                        ),
+                        recommendation="Popraw opis — usuń odniesienia do kotów.",
+                    ))
+
+    return warnings
+
+
+def _self_verify_product_description(
+    result_json: str,
+    provider: AIProvider,
+    settings: AppSettings,
+    ingredients: str,
+    nutrients: dict | None,
+    species: str,
+    lifestage: str,
+    food_type: str,
+    product_name: str,
+    label_b64: str = "",
+    media_type: str = "",
+) -> "ProductDescriptionReport | None":
+    """Self-verify product description — reflection step.
+
+    Sends the generated description back to the AI with the input data
+    as ground truth, asking it to remove hallucinations and unsubstantiated
+    claims. Works in both manual mode (text-only) and image mode.
+    """
+    from fediaf_verifier.models.product_description import (
+        ProductDescriptionReport,
+    )
+
+    if not settings.self_verify_enabled:
+        return None
+
+    logger.info("Self-verify: verifying product description against input data...")
+
+    try:
+        # Build input data summary as ground truth
+        nutrient_lines = []
+        if nutrients:
+            for k, v in nutrients.items():
+                if v:
+                    nutrient_lines.append(f"  {k}: {v}%")
+
+        input_summary = (
+            f"Gatunek: {species}\n"
+            f"Etap zycia: {lifestage}\n"
+            f"Typ karmy: {food_type}\n"
+            f"Nazwa produktu: {product_name}\n"
+            f"Skladniki: {ingredients}\n"
+            f"Skladniki analityczne:\n"
+            + ("\n".join(nutrient_lines) if nutrient_lines else "  (brak danych)")
+        )
+
+        verify_prompt = (
+            PRODUCT_DESCRIPTION_VERIFY_PROMPT.format(input_data=input_summary)
+            + "\n\n"
+            + result_json
+        )
+
+        max_tokens = max(
+            settings.max_tokens_product_desc,
+            len(result_json) // 3 + 2048,
+        )
+
+        if label_b64:
+            raw = provider.call(
+                prompt=verify_prompt,
+                media_b64=label_b64,
+                media_type=media_type,
+                max_tokens=min(max_tokens, 16384),
+            )
+        else:
+            raw = provider.call(
+                prompt=verify_prompt,
+                max_tokens=min(max_tokens, 16384),
+            )
+
+        corrected_json = extract_json(raw)
+        corrected_data = json.loads(corrected_json)
+        corrected = ProductDescriptionReport.model_validate(corrected_data)
+        logger.info("Self-verify: product description corrected successfully")
+        return corrected
+    except Exception as e:
+        logger.warning(
+            "Self-verify failed for product description (using original): {}", e
+        )
+        return None
+
+
+def generate_product_description(
+    provider: AIProvider,
+    settings: AppSettings,
+    target_language: str,
+    target_language_name: str,
+    tone: str,
+    # Manual mode params (text-only):
+    species: str = "",
+    lifestage: str = "",
+    food_type: str = "",
+    ingredients: str = "",
+    nutrients: dict | None = None,
+    product_name: str = "",
+    usps: str = "",
+    brand: str = "",
+    # Image mode params:
+    label_b64: str = "",
+    media_type: str = "",
+) -> "ProductDescriptionResult":
+    """Generate a commercial product description for e-commerce / marketing.
+
+    3-layer verification pipeline:
+      1. AI generates description
+      2. AI self-verify (reflection) removes hallucinations
+      3. Python deterministic rules validate claims
+
+    Supports two input modes:
+      - Image upload: pass label_b64 + media_type (AI extracts data from label)
+      - Manual input: pass species, lifestage, food_type, ingredients, nutrients
+    """
+    from fediaf_verifier.models.product_description import (
+        ProductDescriptionReport,
+        ProductDescriptionResult,
+    )
+
+    logger.info(
+        "Product description generation: {} ({}) [{}]...",
+        target_language_name,
+        target_language,
+        "image" if label_b64 else "manual",
+    )
+
+    if label_b64:
+        prompt = build_product_description_from_image_prompt(
+            target_language=target_language,
+            target_language_name=target_language_name,
+            tone=tone,
+        )
+    else:
+        prompt = build_product_description_prompt(
+            species=species,
+            lifestage=lifestage,
+            food_type=food_type,
+            ingredients=ingredients,
+            nutrients=nutrients or {},
+            target_language=target_language,
+            target_language_name=target_language_name,
+            tone=tone,
+            product_name=product_name,
+            usps=usps,
+            brand=brand,
+        )
+
+    def _call() -> ProductDescriptionResult:
+        # -- Layer 1: AI generates description -----------------------------------
+        if label_b64:
+            raw_text = provider.call(
+                prompt=prompt,
+                media_b64=label_b64,
+                media_type=media_type,
+                max_tokens=settings.max_tokens_product_desc,
+            )
+        else:
+            raw_text = provider.call(
+                prompt=prompt,
+                max_tokens=settings.max_tokens_product_desc,
+            )
+
+        json_text = extract_json(raw_text)
+        data = json.loads(json_text)
+        report = ProductDescriptionReport.model_validate(data)
+
+        # -- Layer 2: AI self-verify (reflection step) ---------------------------
+        corrected = _self_verify_product_description(
+            result_json=json_text,
+            provider=provider,
+            settings=settings,
+            ingredients=ingredients,
+            nutrients=nutrients,
+            species=species or (report.species if report else ""),
+            lifestage=lifestage or (report.lifestage if report else ""),
+            food_type=food_type or (report.food_type if report else ""),
+            product_name=product_name or (report.product_name if report else ""),
+            label_b64=label_b64,
+            media_type=media_type,
+        )
+        if corrected is not None:
+            report = corrected
+
+        # -- Layer 3: Deterministic claim validation (Python hard rules) ---------
+        hard_warnings = _validate_product_description_claims(
+            report=report,
+            ingredients=ingredients or "",
+            nutrients=nutrients,
+        )
+        if hard_warnings:
+            # Merge: avoid duplicates by claim_text
+            existing_claims = {
+                cw.claim_text for cw in (report.claims_warnings or [])
+            }
+            for hw in hard_warnings:
+                if hw.claim_text not in existing_claims:
+                    report.claims_warnings.append(hw)
+                    existing_claims.add(hw.claim_text)
+            logger.info(
+                "Deterministic validation added {} claim warnings",
+                len(hard_warnings),
+            )
+
+        return ProductDescriptionResult(performed=True, report=report)
+
+    try:
+        return api_call_with_retry(_call)
+    except Exception as e:
+        logger.error("Product description generation failed: {}", e)
+        return ProductDescriptionResult(
+            performed=False,
+            error=f"Blad generowania opisu produktu: {e}",
         )
 
 
