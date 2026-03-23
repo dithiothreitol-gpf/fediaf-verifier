@@ -18,6 +18,14 @@ class LinguisticIssue(NullSafeBase):
     suggestion: str = ""
     context: str = ""
     explanation: str = ""
+    confidence: str = Field(
+        default="medium",
+        description="'high' (AI+Hunspell agree), 'medium' (AI only), 'low' (AI only, Hunspell disagrees)",
+    )
+    verified_by: str = Field(
+        default="ai_only",
+        description="Verification source: 'ai+hunspell', 'ai_only', 'hunspell_only'",
+    )
 
 
 class LinguisticReport(NullSafeBase):

@@ -1,0 +1,3 @@
+aikit.ggpf.pl {
+	reverse_proxy homepage:3000
+}

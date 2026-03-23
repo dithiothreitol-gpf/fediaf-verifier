@@ -1,0 +1,11 @@
+- greeting:
+    text_size: xl
+    text: AI Kit
+- datetime:
+    locale: pl
+    format:
+      dateStyle: long
+      timeStyle: short
+- search:
+    provider: google
+    target: _blank

@@ -1,0 +1,3 @@
+# Odkomentuj po podlaczeniu Docker socket do Homepage:
+# my-docker:
+#   socket: /var/run/docker.sock

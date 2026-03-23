@@ -18,6 +18,7 @@ from fediaf_verifier.verifier import (
     create_providers,
     generate_label_text,
     generate_product_description,
+    verify_artwork_inspection,
     verify_claims,
     verify_design_analysis,
     verify_ean,
@@ -26,6 +27,7 @@ from fediaf_verifier.verifier import (
     verify_label_structure,
     verify_linguistic_only,
     verify_market_compliance,
+    verify_presentation,
     verify_translation,
 )
 
@@ -159,8 +161,9 @@ st.markdown(_CUSTOM_CSS, unsafe_allow_html=True)
 
 st.title("\U0001f43e BULT Quality Assurance")
 st.caption(
-    "Weryfikacja sk\u0142adu i zgodno\u015bci etykiet z wytycznymi FEDIAF "
-    "oraz regulacjami EU \u2014 zanim produkt trafi do miski."
+    "Weryfikacja etykiet, inspekcja artwork\u00f3w, kontrola claim\u00f3w, "
+    "spellcheck, t\u0142umaczenia i generowanie tekst\u00f3w \u2014 "
+    "wszystko czego potrzebuje Tw\u00f3j produkt, zanim trafi na p\u00f3\u0142k\u0119."
 )
 
 
@@ -204,6 +207,8 @@ if "report_old_filename" not in st.session_state:
     st.session_state.report_old_filename = ""
 if "report_new_filename" not in st.session_state:
     st.session_state.report_new_filename = ""
+if "report_artwork_proof" not in st.session_state:
+    st.session_state.report_artwork_proof = ""
 
 # -- Sidebar ---------------------------------------------------------------------------
 MARKETS = [
@@ -226,10 +231,12 @@ _MODE_TRANSLATION = "\U0001f310 T\u0142umaczenie etykiety"
 _MODE_DESIGN = "\U0001f3a8 Analiza projektu graficznego"
 _MODE_EAN = "\U0001f4e6 Walidator EAN/kod\u00f3w"
 _MODE_CLAIMS = "\u2713 Walidator claim\u00f3w"
+_MODE_PRESENTATION = "\U0001f3f7\ufe0f Weryfikator nazw i zastrze\u017ce\u0144"
 _MODE_MARKET = "\U0001f30d Walidator rynkowy"
 _MODE_LABEL_TEXT = "\U0001f4dd Generator tekstu etykiety"
 _MODE_DIFF = "\U0001f504 Por\u00f3wnanie wersji"
 _MODE_PRODUCT_DESC = "\U0001f4dd Generator opis\u00f3w produkt\u00f3w"
+_MODE_ARTWORK = "\U0001f50d Inspekcja artwork"
 
 _TRANSLATION_LANGUAGES = {
     "en": "English",
@@ -268,7 +275,7 @@ with st.sidebar:
     if _mode_group == _GROUP_VERIFY:
         verification_mode = st.selectbox(
             "Tryb",
-            [_MODE_FULL, _MODE_LINGUISTIC, _MODE_STRUCTURE, _MODE_CLAIMS, _MODE_MARKET],
+            [_MODE_FULL, _MODE_LINGUISTIC, _MODE_STRUCTURE, _MODE_CLAIMS, _MODE_PRESENTATION, _MODE_MARKET, _MODE_ARTWORK],
             label_visibility="collapsed",
         )
     elif _mode_group == _GROUP_TOOLS:
@@ -287,10 +294,12 @@ with st.sidebar:
     is_design_analysis = verification_mode == _MODE_DESIGN
     is_ean_check = verification_mode == _MODE_EAN
     is_claims_check = verification_mode == _MODE_CLAIMS
+    is_presentation_check = verification_mode == _MODE_PRESENTATION
     is_market_check = verification_mode == _MODE_MARKET
     is_label_text_gen = verification_mode == _MODE_LABEL_TEXT
     is_diff_check = verification_mode == _MODE_DIFF
     is_product_desc = verification_mode == _MODE_PRODUCT_DESC
+    is_artwork_check = verification_mode == _MODE_ARTWORK
 
     # -- Mode-specific options --
     st.divider()
@@ -371,7 +380,7 @@ with st.sidebar:
         _pd_target_lang = _pd_lang_codes[_pd_lang_idx]
         _pd_target_name = list(_TRANSLATION_LANGUAGES.values())[_pd_lang_idx]
 
-    elif not is_linguistic_only and not is_structure_check and not is_design_analysis and not is_ean_check and not is_claims_check and not is_market_check and not is_label_text_gen and not is_diff_check and not is_product_desc:
+    elif not is_linguistic_only and not is_structure_check and not is_design_analysis and not is_ean_check and not is_claims_check and not is_presentation_check and not is_market_check and not is_label_text_gen and not is_diff_check and not is_product_desc and not is_artwork_check:
         # Full verification mode — market selector
         market_selection = st.selectbox(
             "Rynek docelowy",
@@ -385,7 +394,7 @@ with st.sidebar:
             None if market_selection == MARKETS[0] else market_selection
         )
 
-    if not is_linguistic_only and not is_structure_check and not is_translation and not is_design_analysis and not is_ean_check and not is_claims_check and not is_market_check and not is_label_text_gen and not is_diff_check and not is_product_desc:
+    if not is_linguistic_only and not is_structure_check and not is_translation and not is_design_analysis and not is_ean_check and not is_claims_check and not is_presentation_check and not is_market_check and not is_label_text_gen and not is_diff_check and not is_product_desc and not is_artwork_check:
         st.divider()
 
         pdf_path = settings.fediaf_pdf_path
@@ -450,6 +459,46 @@ prostok\u0105tami (dost\u0119pna dla plik\u00f3w PDF i obraz\u00f3w)
 5. **Przejrzyj wynik** \u2014 pe\u0142ny opis, kr\u00f3tki opis, bullet points, SEO, HTML
 6. **Pobierz** \u2014 TXT, HTML lub JSON
 """)
+        elif is_claims_check:
+            st.markdown("""\
+1. **Wgraj etykiet\u0119** \u2014 JPG, PNG, PDF lub DOCX
+2. **Kliknij "Sprawd\u017a claimy"** \u2014 analiza trwa 15\u201330 sekund
+3. **Przejrzyj raport** \u2014 ka\u017cdy claim oceniony pod k\u0105tem sp\u00f3jno\u015bci ze sk\u0142adem
+4. **Sprawd\u017a regu\u0142y %** \u2014 walidacja nazewnictwa wg EU 767/2009
+5. **Pobierz raport TXT** \u2014 do wydruku lub przekazania dzia\u0142owi jako\u015bci
+""")
+        elif is_presentation_check:
+            st.markdown("""\
+1. **Wgraj etykiet\u0119** \u2014 JPG, PNG, PDF lub DOCX
+2. **Kliknij "Sprawd\u017a prezentacj\u0119 handlow\u0105"** \u2014 analiza trwa 20\u201340 sekund
+3. **Przejrzyj 4 sekcje:**
+   - **Receptury** \u2014 czy claimy o recepturze s\u0105 uzasadnione
+   - **Nazwy** \u2014 regu\u0142y % (EU 767/2009 Art.17) i sp\u00f3jno\u015b\u0107 nazwy
+   - **Marka** \u2014 czy brand nie zawiera zabronionych termin\u00f3w
+   - **Zastrze\u017cenia** \u2014 potencjalne naruszenia znak\u00f3w towarowych
+4. **Pobierz raport TXT** \u2014 do wydruku lub przekazania dzia\u0142owi prawnemu
+""")
+        elif is_market_check:
+            st.markdown("""\
+1. **Wgraj etykiet\u0119** \u2014 JPG, PNG, PDF lub DOCX
+2. **Wybierz rynek docelowy** w panelu bocznym
+3. **Kliknij "Sprawd\u017a zgodno\u015b\u0107 rynkow\u0105"** \u2014 analiza trwa 20\u201340 sekund
+4. **Przejrzyj raport** \u2014 wymogi regulacyjne dla wybranego kraju
+5. **Pobierz raport TXT** \u2014 do wydruku lub przekazania dzia\u0142owi jako\u015bci
+""")
+        elif is_artwork_check:
+            st.markdown("""\
+1. **Wybierz tryb** \u2014 pojedynczy plik lub por\u00f3wnanie master vs proof
+2. **Wgraj plik(i)** \u2014 JPG, PNG, PDF lub TIFF
+3. **Ustaw czu\u0142o\u015b\u0107** \u2014 suwak threshold (domy\u015blnie 30)
+4. **Kliknij "Inspekcja artwork"** \u2014 analiza trwa 10\u201330 sekund
+5. **Przejrzyj raport:**
+   - **Gotowosc do druku** \u2014 DPI, CMYK, fonty, bleed
+   - **Kolory** \u2014 paleta + Delta E (przy porownaniu)
+   - **Pixel diff** \u2014 SSIM + mapa roznic (przy porownaniu)
+   - **Podsumowanie AI** \u2014 interpretacja wynikow
+6. **Pobierz raport** \u2014 TXT lub JSON
+""")
         else:
             st.markdown("""\
 1. **Wgraj etykiet\u0119** \u2014 przeci\u0105gnij plik lub kliknij przycisk uploadu
@@ -498,6 +547,13 @@ w Illustratorze zamiast eksportu
 **Wskaz\u00f3wki:**
 - Im lepsza jako\u015b\u0107 zdj\u0119cia, tym dok\u0142adniejsze wykrywanie b\u0142\u0119d\u00f3w
 - Upewnij si\u0119, \u017ce tekst na etykiecie jest czytelny
+""")
+        elif is_claims_check or is_presentation_check:
+            st.markdown("""\
+**Wskaz\u00f3wki:**
+- Wgraj pe\u0142n\u0105 etykiet\u0119 \u2014 front i ty\u0142 (je\u015bli to zdj\u0119cie)
+- System analizuje nazwy, sk\u0142adniki, claimy i elementy marki
+- Im wi\u0119cej tekstu widocznego na etykiecie, tym dok\u0142adniejsza analiza
 """)
         else:
             st.markdown("""\
@@ -607,6 +663,43 @@ Sprawdzenie per j\u0119zyk, czy czcionka zawiera wymagane znaki:
 
 Ka\u017cdy b\u0142\u0105d zawiera: oryginalny tekst, sugestowan\u0105 poprawk\u0119 \
 i kr\u00f3tkie wyja\u015bnienie.
+""")
+    elif is_claims_check:
+        with st.expander("Co oznaczaj\u0105 sekcje raportu?"):
+            st.markdown("""\
+**Status sp\u00f3jno\u015bci:**
+- \u2705 **Sp\u00f3jne** \u2014 wszystkie claimy zgodne ze sk\u0142adem
+- \u26a0\ufe0f **Niesp\u00f3jno\u015bci** \u2014 wykryto rozbie\u017cno\u015bci
+- \u26d4 **Krytyczne** \u2014 wymagana natychmiastowa korekta
+
+**Walidacja claim\u00f3w:**
+Ka\u017cdy claim sprawdzany pod k\u0105tem sp\u00f3jno\u015bci ze sk\u0142adem. \
+Kategorie: procentowe, grain-free, sk\u0142adnikowe, od\u017cywcze, terapeutyczne.
+
+**Regu\u0142a % w nazwie (EU 767/2009):**
+"z X" = min 4%, "bogaty w X" = min 14%, nazwa = X = min 26%.
+""")
+    elif is_presentation_check:
+        with st.expander("Co oznaczaj\u0105 sekcje raportu?"):
+            st.markdown("""\
+**4 sekcje raportu:**
+Ka\u017cda sekcja oceniana osobno 0\u2013100.
+
+**Receptury** \u2014 czy claimy o recepturze (oryginalna, monobia\u0142kowa, \
+vet-developed, bez konserwant\u00f3w) s\u0105 uzasadnione sk\u0142adem i regulacjami.
+
+**Nazwy** \u2014 regu\u0142y procentowe EU 767/2009 Art.17 \
+(5 prog\u00f3w: 100%/26%/14%/4%/<4%) + sp\u00f3jno\u015b\u0107 nazwy z typem karmy, \
+gatunkiem, etapem \u017cycia.
+
+**Marka** \u2014 czy elementy marki nie naruszaj\u0105 regulacji \
+(Bio, Vet, Natural, Medical, implikacje geograficzne).
+
+**Zastrze\u017cenia** \u2014 potencjalne naruszenia znak\u00f3w towarowych, \
+poprawno\u015b\u0107 symboli \u00ae i \u2122, zbie\u017cno\u015b\u0107 z markami konkurencji.
+
+**Wynik og\u00f3lny** \u2014 \u015brednia wa\u017cona: receptury 25%, nazwy 30%, \
+marka 25%, zastrze\u017cenia 20%.
 """)
     else:
         with st.expander("Co oznaczaj\u0105 sekcje raportu?"):
@@ -729,6 +822,34 @@ z konkretnymi sugestiami poprawek.
 
 *Tryb szybki \u2014 bez analizy sk\u0142adu i zgodno\u015bci.*
 """)
+        elif is_claims_check:
+            st.markdown("""\
+**Walidacja claim\u00f3w \u2014 1 wywo\u0142anie AI:**
+
+System ekstrahuje z etykiety wszystkie claimy marketingowe \
+i list\u0119 sk\u0142adnik\u00f3w z procentami, a nast\u0119pnie sprawdza:
+
+1. Czy claimy procentowe zgadzaj\u0105 si\u0119 ze sk\u0142adem
+2. Czy claimy "bez X" nie s\u0105 sprzeczne ze sk\u0142adnikami
+3. Czy nazewnictwo spe\u0142nia regu\u0142y % (EU 767/2009)
+4. Czy nie ma zabronionych claim\u00f3w terapeutycznych
+
+Wynik poddawany jest samo-weryfikacji (usuwanie fa\u0142szywych alarm\u00f3w).
+""")
+        elif is_presentation_check:
+            st.markdown("""\
+**Weryfikacja prezentacji handlowej \u2014 1 wywo\u0142anie AI:**
+
+System analizuje etykiet\u0119 pod k\u0105tem 4 aspekt\u00f3w regulacyjnych:
+
+1. **Receptury** \u2014 weryfikacja claim\u00f3w o recepturze vs sk\u0142ad i dodatki
+2. **Nazwy** \u2014 pe\u0142na walidacja EU 767/2009 Art.17 + sp\u00f3jno\u015b\u0107 nazwy
+3. **Marka** \u2014 zgodno\u015b\u0107 brandu z EU 2018/848, FEDIAF CoGLP, EU 767/2009 Art.13
+4. **Zastrze\u017cenia** \u2014 analiza IP/trademark vs znane marki bran\u017cy pet food
+
+Wynik poddawany jest samo-weryfikacji AI (usuwanie fa\u0142szywych alarm\u00f3w). \
+Score obliczany jako \u015brednia wa\u017cona 4 sekcji.
+""")
         else:
             st.markdown("""\
 **Pe\u0142na weryfikacja \u2014 2 wywo\u0142ania AI + analiza Python:**
@@ -821,6 +942,38 @@ System podaje najlepsz\u0105 sugestiowan\u0105 poprawk\u0119, ale korektor \
 powinien zweryfikowa\u0107 kontekst. Terminologia bran\u017cowa \
 (np. nazwy dodatk\u00f3w) mo\u017ce by\u0107 poprawna mimo zg\u0142oszenia.
 """)
+    elif is_claims_check:
+        with st.expander("Kiedy konsultowa\u0107 z ekspertem?"):
+            st.markdown("""\
+**Przekazuj do eksperta gdy:**
+- Wynik < 70 \u2014 znacz\u0105ce niesp\u00f3jno\u015bci
+- Claim terapeutyczny wykryty \u2014 konsultacja z dzia\u0142em prawnym
+- Regu\u0142a % w nazwie naruszona \u2014 weryfikacja z technologiem
+- Produkt na rynek zagraniczny \u2014 regulacje mog\u0105 si\u0119 r\u00f3\u017cni\u0107
+
+**Claimy AI jako sygnalizacja:**
+System flaguje potencjalne problemy. Ostateczna ocena \
+nale\u017cy do specjalisty ds. jako\u015bci lub dzia\u0142u prawnego.
+""")
+    elif is_presentation_check:
+        with st.expander("Kiedy konsultowa\u0107 z prawnikiem/ekspertem?"):
+            st.markdown("""\
+**Natychmiast konsultuj z prawnikiem gdy:**
+- Wykryto termin "Medical"/"Leczniczy" w marce \
+(zabronione, EU 767/2009 Art.13)
+- "Bio"/"Organic" bez certyfikatu \u2014 naruszenie EU 2018/848
+- "Vet"/"Clinical" bez klasyfikacji dietetycznej \u2014 naruszenie EU 2020/354
+- Wysokie ryzyko naruszenia znaku towarowego
+
+**Konsultuj z technologiem \u017cywno\u015bci gdy:**
+- Claim "monobia\u0142kowa" ale wykryto ukryte \u017ar\u00f3d\u0142a bia\u0142ka
+- Claim "pe\u0142noporcjowa" przy niepe\u0142nym sk\u0142adzie od\u017cywczym
+- Regu\u0142y procentowe w nazwie naruszone
+
+**Raport jako sygnalizacja:**
+Analiza AI flaguje potencjalne ryzyka regulacyjne i IP. \
+Nie zast\u0119puje opinii prawnej ani audytu znak\u00f3w towarowych.
+""")
     else:
         with st.expander("Kiedy konsultowa\u0107 z ekspertem?"):
             st.markdown("""\
@@ -885,6 +1038,30 @@ System automatycznie oznacza raport jako **wymagaj\u0105cy przegl\u0105du** gdy:
 | **Diakrytyki** | Znaki \u0105 \u0119 \u015b \u0107 \u017a \u017c \u0142 \u0144 \u00f3 \u2014 cz\u0119sto gubione przez czcionki |
 | **Terminologia** | Sp\u00f3jno\u015b\u0107 u\u017cywanych termin\u00f3w w obr\u0119bie etykiety |
 | **Jako\u015b\u0107 tekstu** | Ocena og\u00f3lna: excellent / good / needs_review / poor |
+""")
+        elif is_claims_check:
+            st.markdown("""\
+| Poj\u0119cie | Znaczenie |
+|---------|-----------|
+| **Claim** | O\u015bwiadczenie marketingowe na etykiecie (np. "70% mi\u0119sa") |
+| **EU 767/2009 Art.17** | Regu\u0142y nazewnictwa produkt\u00f3w paszowych |
+| **Regu\u0142a 4%/14%/26%** | Minimalne % sk\u0142adnika wymaganego przez nazw\u0119 |
+| **Grain-free** | Claim "bez zb\u00f3\u017c" \u2014 weryfikowany vs lista sk\u0142adnik\u00f3w |
+| **Claim terapeutyczny** | O\u015bwiadczenie lecznicze \u2014 zabronione per Art.13 |
+""")
+        elif is_presentation_check:
+            st.markdown("""\
+| Poj\u0119cie | Znaczenie |
+|---------|-----------|
+| **Prezentacja handlowa** | Spos\u00f3b przedstawienia produktu na etykiecie |
+| **EU 767/2009 Art.17** | Regu\u0142y procentowe w nazewnictwie karm |
+| **FEDIAF CoGLP** | Code of Good Labelling Practice \u2014 dobre praktyki |
+| **EU 2018/848** | Regulacja dot. produkt\u00f3w ekologicznych (Bio/Organic) |
+| **EU 2020/354** | Lista zastosowa\u0144 karm dietetycznych (PARNUT) |
+| **Znak towarowy (\u00ae)** | Zarejestrowany znak towarowy (EUIPO/UPRP) |
+| **TM (\u2122)** | Niezarejestrowane roszczenie do znaku towarowego |
+| **Monobia\u0142kowa** | Receptura z jednym \u017ar\u00f3d\u0142em bia\u0142ka zwierz\u0119cego |
+| **Karma pe\u0142noporcjowa** | Pokrywaj\u0105ca 100% potrzeb \u017cywieniowych (complete feed) |
 """)
         else:
             st.markdown("""\
@@ -980,6 +1157,40 @@ priorytetyzuj\u0105c te o najwi\u0119kszym wp\u0142ywie na jako\u015b\u0107.
 Tak. System automatycznie wykrywa j\u0119zyk(i) i sprawdza \
 ka\u017cdy fragment tekstu. Wykrywa te\u017c mieszanie j\u0119zyk\u00f3w.
 """)
+        elif is_claims_check:
+            st.markdown("""\
+**Ile trwa analiza?**
+15\u201330 sekund.
+
+**Czym si\u0119 r\u00f3\u017cni od pe\u0142nej weryfikacji?**
+Pe\u0142na weryfikacja sprawdza sk\u0142ad od\u017cywczy vs FEDIAF + EU 767/2009. \
+Walidator claim\u00f3w skupia si\u0119 na sp\u00f3jno\u015bci claim\u00f3w marketingowych \
+ze sk\u0142adem.
+
+**Czy system wykrywa wszystkie claimy?**
+System ekstrahuje widoczne claimy z etykiety. Ukryte lub nieczytelne \
+elementy mog\u0105 zosta\u0107 pomini\u0119te \u2014 jako\u015b\u0107 zdj\u0119cia ma znaczenie.
+""")
+        elif is_presentation_check:
+            st.markdown("""\
+**Ile trwa analiza?**
+20\u201340 sekund.
+
+**Czym si\u0119 r\u00f3\u017cni od walidatora claim\u00f3w?**
+Walidator claim\u00f3w sprawdza sp\u00f3jno\u015b\u0107 claim\u00f3w ze sk\u0142adem. \
+Weryfikator nazw i zastrze\u017ce\u0144 sprawdza zgodno\u015b\u0107 regulacyjn\u0105 \
+prezentacji handlowej: nazewnictwo, marka, receptury i IP/trademark.
+
+**Czy system mo\u017ce zast\u0105pi\u0107 opini\u0119 prawn\u0105?**
+Nie. System flaguje potencjalne ryzyka, ale nie jest \u017ar\u00f3d\u0142em \
+wiedzy prawnej. Kwestie znak\u00f3w towarowych wymagaj\u0105 weryfikacji \
+w bazach EUIPO/UPRP.
+
+**Jak dok\u0142adna jest analiza znak\u00f3w towarowych?**
+Orientacyjna. System por\u00f3wnuje z baz\u0105 znanych marek pet food, \
+ale nie ma dost\u0119pu do rejestru EUIPO. Traktuj jako sygnalizacj\u0119 \
+do dalszej weryfikacji.
+""")
         else:
             st.markdown("""\
 **Ile trwa analiza?**
@@ -1010,6 +1221,12 @@ Przy cz\u0119stych b\u0142\u0119dach \u2014 odczekaj minut\u0119 mi\u0119dzy ana
 """)
 
     st.divider()
+
+    # -- Optional features manager (install buttons for non-technical users) --
+    from fediaf_verifier.deps import render_feature_manager
+
+    render_feature_manager()
+
     st.caption("v1.0 \u00b7 BULT Quality Assurance")
 
 
@@ -1064,11 +1281,67 @@ pasteZone.addEventListener('click', function() { this.focus(); });
 if "pasted_image" not in st.session_state:
     st.session_state.pasted_image = None
 
+# -- Artwork inspection mode: single or dual file uploaders -------------------------
+_artwork_master = None
+_artwork_proof = None
+_artwork_mode = "single"
+_artwork_threshold = 30
+
+if is_artwork_check:
+    st.subheader("\U0001f50d Inspekcja artwork")
+    _artwork_mode = st.radio(
+        "Tryb inspekcji",
+        ["single", "compare"],
+        format_func=lambda x: {
+            "single": "Pojedynczy plik (print readiness + kolory)",
+            "compare": "Por\u00f3wnanie: master vs proof (pixel diff + kolory + print)",
+        }[x],
+        horizontal=True,
+        key="artwork_mode",
+    )
+
+    _artwork_threshold = st.slider(
+        "Czu\u0142o\u015b\u0107 detekcji zmian (pixel threshold)",
+        min_value=5, max_value=100, value=30, step=5,
+        help="Ni\u017csza warto\u015b\u0107 = wi\u0119ksza czu\u0142o\u015b\u0107 na drobne r\u00f3\u017cnice",
+        key="artwork_threshold",
+    )
+
+    if _artwork_mode == "compare":
+        col_m, col_p = st.columns(2)
+        with col_m:
+            _artwork_master = st.file_uploader(
+                "Master (referencja)",
+                type=["jpg", "jpeg", "png", "pdf", "tiff", "tif"],
+                help="Zatwierdzony artwork master",
+                key="artwork_master",
+            )
+        with col_p:
+            _artwork_proof = st.file_uploader(
+                "Proof (do sprawdzenia)",
+                type=["jpg", "jpeg", "png", "pdf", "tiff", "tif"],
+                help="Proof do por\u00f3wnania z masterem",
+                key="artwork_proof",
+            )
+    else:
+        _artwork_master = st.file_uploader(
+            "Wgraj etykiet\u0119 do inspekcji",
+            type=["jpg", "jpeg", "png", "pdf", "tiff", "tif"],
+            help="JPG, PNG, PDF lub TIFF",
+            key="artwork_single",
+        )
+
+    # Don't use the standard uploader
+    uploaded = None
+
 # -- Diff mode: dual file uploaders ------------------------------------------------
 uploaded_old = None
 uploaded_new = None
 
-if is_diff_check:
+if is_artwork_check:
+    # Artwork mode has its own uploaders above — skip standard uploader
+    uploaded = None
+elif is_diff_check:
     st.subheader("Por\u00f3wnanie wersji etykiety")
     col_old, col_new = st.columns(2)
     with col_old:
@@ -1148,6 +1421,9 @@ if uploaded:
         elif is_claims_check:
             st.markdown("**Tryb:** walidacja claim\u00f3w")
             st.caption("Analiza claim\u00f3w vs sk\u0142ad \u2014 ok. 15\u201330 sekund.")
+        elif is_presentation_check:
+            st.markdown("**Tryb:** walidacja prezentacji handlowej")
+            st.caption("Analiza receptur, nazw, marki i zastrze\u017ce\u0144 \u2014 ok. 20\u201340 sekund.")
         elif is_market_check:
             st.markdown(f"**Tryb:** walidacja rynkowa ({_market_target_name})")
             st.caption("Analiza wymog\u00f3w krajowych \u2014 ok. 20\u201340 sekund.")
@@ -1505,7 +1781,7 @@ def _run_translation(
     st.session_state.report_market = None
 
 
-def _run_design_analysis(uploaded_file) -> None:
+def _run_design_analysis(uploaded_file, segment: str = "premium_dry") -> None:
     with st.spinner(
         "Analizuj\u0119 projekt graficzny... (ok. 30\u201360 sekund)"
     ):
@@ -1519,6 +1795,7 @@ def _run_design_analysis(uploaded_file) -> None:
                 media_type=media_type,
                 provider=secondary_provider,
                 settings=settings,
+                segment=segment,
             )
         except ConversionError as e:
             st.error(f"**B\u0142\u0105d pliku:** {e}")
@@ -1592,6 +1869,38 @@ def _run_claims_check(uploaded_file) -> None:
         except Exception as e:
             st.error(f"**Nieoczekiwany b\u0142\u0105d:** {e}")
             logger.exception("Unexpected error during claims check")
+            return
+
+    st.session_state.report = result
+    st.session_state.report_filename = uploaded_file.name
+    st.session_state.report_market = None
+
+
+def _run_presentation_check(uploaded_file) -> None:
+    with st.spinner(
+        "Sprawdzam zgodno\u015b\u0107 prezentacji handlowej... "
+        "(ok. 20\u201340 sekund)"
+    ):
+        try:
+            uploaded_file.seek(0)
+            label_b64, media_type = file_to_base64(
+                uploaded_file.read(), uploaded_file.name
+            )
+            result = verify_presentation(
+                label_b64=label_b64,
+                media_type=media_type,
+                provider=secondary_provider,
+                settings=settings,
+            )
+        except ConversionError as e:
+            st.error(f"**B\u0142\u0105d pliku:** {e}")
+            return
+        except FediafVerifierError as e:
+            st.error(f"**B\u0142\u0105d API:** {e}")
+            return
+        except Exception as e:
+            st.error(f"**Nieoczekiwany b\u0142\u0105d:** {e}")
+            logger.exception("Unexpected error during presentation check")
             return
 
     st.session_state.report = result
@@ -1717,6 +2026,53 @@ def _run_product_description(form_data: dict | None, uploaded_file=None) -> None
     st.session_state.report_market = None
 
 
+def _run_artwork_inspection(
+    master_file, proof_file=None, threshold: int = 30,
+) -> None:
+    mode_label = (
+        "Por\u00f3wnuj\u0119 master vs proof..."
+        if proof_file else "Analizuj\u0119 artwork..."
+    )
+    with st.spinner(f"{mode_label} (ok. 10\u201330 sekund)"):
+        try:
+            master_file.seek(0)
+            master_b64, master_mt = file_to_base64(
+                master_file.read(), master_file.name
+            )
+            proof_b64, proof_mt = None, None
+            if proof_file:
+                proof_file.seek(0)
+                proof_b64, proof_mt = file_to_base64(
+                    proof_file.read(), proof_file.name
+                )
+            result = verify_artwork_inspection(
+                img_a_b64=master_b64,
+                media_type_a=master_mt,
+                provider=secondary_provider,
+                settings=settings,
+                img_b_b64=proof_b64,
+                media_type_b=proof_mt,
+                pixel_diff_threshold=threshold,
+            )
+        except ConversionError as e:
+            st.error(f"**B\u0142\u0105d pliku:** {e}")
+            return
+        except FediafVerifierError as e:
+            st.error(f"**B\u0142\u0105d API:** {e}")
+            return
+        except Exception as e:
+            st.error(f"**Nieoczekiwany b\u0142\u0105d:** {e}")
+            logger.exception("Unexpected error during artwork inspection")
+            return
+
+    st.session_state.report = result
+    st.session_state.report_filename = master_file.name
+    st.session_state.report_artwork_proof = (
+        proof_file.name if proof_file else ""
+    )
+    st.session_state.report_market = None
+
+
 def _run_diff_check(old_file, new_file) -> None:
     with st.spinner(
         "Por\u00f3wnuj\u0119 wersje etykiety... (ok. 20\u201340 sekund)"
@@ -1775,6 +2131,11 @@ if uploaded and is_claims_check and st.button(
 ):
     _run_claims_check(uploaded)
 
+if uploaded and is_presentation_check and st.button(
+    "Sprawd\u017a prezentacj\u0119 handlow\u0105", type="primary", use_container_width=True
+):
+    _run_presentation_check(uploaded)
+
 if uploaded and is_market_check and st.button(
     "Sprawd\u017a zgodno\u015b\u0107 rynkow\u0105", type="primary", use_container_width=True
 ):
@@ -1805,10 +2166,35 @@ if uploaded and is_ean_check and st.button(
 ):
     _run_ean_check(uploaded)
 
-if uploaded and is_design_analysis and st.button(
-    "Analizuj design", type="primary", use_container_width=True
+_artwork_ready = (
+    is_artwork_check
+    and _artwork_master is not None
+    and (_artwork_mode == "single" or _artwork_proof is not None)
+)
+if _artwork_ready and st.button(
+    "Inspekcja artwork", type="primary", use_container_width=True
 ):
-    _run_design_analysis(uploaded)
+    _run_artwork_inspection(_artwork_master, _artwork_proof, _artwork_threshold)
+
+_SEGMENT_LABELS = {
+    "premium_dry": "Premium sucha karma",
+    "economy_dry": "Ekonomiczna sucha karma",
+    "premium_wet": "Premium mokra karma",
+    "economy_wet": "Ekonomiczna mokra karma",
+    "treats": "Przysmaki",
+    "supplements": "Suplementy",
+    "barf_raw": "BARF / surowa",
+    "veterinary": "Weterynaryjna",
+}
+if uploaded and is_design_analysis:
+    _design_segment = st.selectbox(
+        "Segment produktu (do benchmarku)",
+        options=list(_SEGMENT_LABELS.keys()),
+        format_func=lambda k: _SEGMENT_LABELS[k],
+        index=0,
+    )
+    if st.button("Analizuj design", type="primary", use_container_width=True):
+        _run_design_analysis(uploaded, segment=_design_segment)
 
 if uploaded and is_structure_check and st.button(
     "Sprawd\u017a struktur\u0119", type="primary", use_container_width=True
@@ -1820,7 +2206,7 @@ if uploaded and is_linguistic_only and st.button(
 ):
     _run_linguistic_only(uploaded)
 
-if uploaded and not is_linguistic_only and not is_structure_check and not is_translation and not is_design_analysis and not is_ean_check and not is_claims_check and not is_market_check and not is_label_text_gen and not is_diff_check and not is_product_desc and st.button(
+if uploaded and not is_linguistic_only and not is_structure_check and not is_translation and not is_design_analysis and not is_ean_check and not is_claims_check and not is_presentation_check and not is_market_check and not is_label_text_gen and not is_diff_check and not is_product_desc and not is_artwork_check and st.button(
     "Sprawd\u017a etykiet\u0119", type="primary", use_container_width=True
 ):
     _run_verification(uploaded, selected_market)
@@ -1828,6 +2214,7 @@ if uploaded and not is_linguistic_only and not is_structure_check and not is_tra
 
 # -- Report rendering (imported from renderers.py) ------------------------------------
 from fediaf_verifier.renderers import (
+    render_artwork_inspection_report,
     render_claims_report,
     render_design_report,
     render_diff_report,
@@ -1835,6 +2222,7 @@ from fediaf_verifier.renderers import (
     render_label_text_report,
     render_linguistic_report,
     render_market_report,
+    render_presentation_report,
     render_product_description_report,
     render_report,
     render_structure_report,
@@ -1847,8 +2235,16 @@ if st.session_state.report is not None:
     report = st.session_state.report
     # Use class name for dispatch — robust against Streamlit hot-reload
     _report_type = type(report).__name__
-    if _report_type == "ClaimsCheckResult":
+    if _report_type == "ArtworkInspectionResult":
+        render_artwork_inspection_report(
+            report,
+            st.session_state.report_filename,
+            getattr(st.session_state, "report_artwork_proof", ""),
+        )
+    elif _report_type == "ClaimsCheckResult":
         render_claims_report(report, st.session_state.report_filename)
+    elif _report_type == "PresentationCheckResult":
+        render_presentation_report(report, st.session_state.report_filename)
     elif _report_type == "MarketCheckResult":
         render_market_report(report, st.session_state.report_filename)
     elif _report_type == "LabelTextResult":

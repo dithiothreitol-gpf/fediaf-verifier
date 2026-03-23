@@ -1,0 +1,19 @@
+title: AI Kit — GGPF
+favicon: https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/png/homepage.png
+
+theme: dark
+color: blue
+
+layout:
+  Quality Assurance:
+    style: row
+    columns: 3
+    header: true
+  Resources:
+    style: row
+    columns: 3
+    header: true
+
+headerStyle: clean
+
+language: pl

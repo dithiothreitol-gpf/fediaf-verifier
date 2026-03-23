@@ -396,6 +396,46 @@ trend_alignment (lista stringow),
 actionable_summary (podsumowanie dla R&D — konkretne akcje)."""
 
 
+# -- Artwork inspection AI summary prompt -----------------------------------------------
+
+
+def build_artwork_summary_prompt(findings_json: str) -> str:
+    """Build prompt for AI to summarize deterministic artwork inspection findings.
+
+    The AI receives structured JSON with pixel diff, color analysis, and
+    print readiness results and produces a human-readable summary with
+    actionable recommendations in Polish.
+
+    Args:
+        findings_json: JSON string with ArtworkInspectionReport data
+            (pixel_diff, color_analysis, print_readiness sub-reports).
+    """
+    return f"""\
+Jestes ekspertem od kontroli jakosci opakowan (artwork QA) w branzy pet food. \
+Otrzymujesz wyniki DETERMINISTYCZNEJ inspekcji artwork etykiety — \
+dane sa obiektywne (SSIM, Delta E, DPI, przestrzen barw).
+
+Twoje zadanie:
+1. Przeanalizuj wyniki i napisz ZWIEZLE podsumowanie po polsku (3-5 zdan)
+2. Podaj liste KONKRETNYCH, WYKONALNYCH rekomendacji (max 7)
+3. Skup sie na problemach ISTOTNYCH dla druku i produkcji
+
+WYNIKI INSPEKCJI (JSON):
+{findings_json}
+
+WAZNE:
+- Nie powtarzaj surowych danych liczbowych — interpretuj je
+- Uzyj jezyka zrozumialego dla dzialu R&D / grafika
+- Priorytetyzuj: najpierw problemy krytyczne (DPI, fonty), potem ostrzezenia
+- Jesli SSIM > 0.99 i brak problemow — powiedz krotko ze jest OK
+- Delta E < 2 = niezauwazalne, 2-5 = drobna roznica, >5 = widoczna zmiana
+- DPI < 150 = krytyczne, 150-299 = ostrzezenie, >=300 = OK
+- RGB zamiast CMYK = ostrzezenie (kolory moga sie roznic po druku)
+
+Odpowiedz WYLACZNIE poprawnym JSON (bez markdown):
+{{"ai_summary": "...", "ai_recommendations": ["...", "..."]}}"""
+
+
 # -- Per-market compliance check prompt -------------------------------------------------
 
 
@@ -566,6 +606,154 @@ therapeutic_claims_found (lista stringow),
 overall_consistency ("consistent"/"inconsistencies_found"/"critical_issues"),
 score (0-100, gdzie 100 = pelna spojnosc),
 summary (krotkie podsumowanie po polsku)."""
+
+
+# -- Commercial presentation compliance prompt ----------------------------------
+
+
+PRESENTATION_CHECK_PROMPT = """\
+Przeanalizuj etykiete karmy dla zwierzat domowych pod katem \
+ZGODNOSCI PREZENTACJI HANDLOWEJ z przepisami EU 767/2009, \
+FEDIAF Code of Good Labelling Practice i regulacjami krajowymi.
+
+EKSTRAKCJA KONTEKSTU:
+- Wyekstrahuj nazwe produktu, nazwe marki, klasyfikacje produktu \
+(pelnoporcjowa/uzupelniajaca), typ karmy (sucha/mokra/polwilgotna), \
+gatunek docelowy, etap zycia, liste skladnikow z procentami (jesli podane), \
+liste dodatkow technologicznych i konserwantow.
+
+SEKCJA 1 — RECEPTURY (recipe-level claims):
+Znajdz i zweryfikuj KAZDY claim zwiazany z receptura:
+- "oryginalna receptura", "nowa ulepszona formula" — czy uzasadniony? \
+Jesli brak dowodu na porownanie z poprzednia wersja = warning.
+- "Receptura opracowana przez weterynarzy" / "vet-formulated" — \
+czy jest dowod (logo organizacji weterynaryjnej, podpis)? Jesli nie = warning.
+- "Monobialkowa receptura" / "Single protein" — sprawdz czy faktycznie jest \
+jedno zrodlo bialka w skladzie. Uwzglednij bialka ukryte w dodatkach \
+(np. hydrolizat bialkowy, maczka rybna). Jesli wiele zrodel = critical.
+- Klasyfikacja pelnoporcjowa vs uzupelniajaca — czy receptura spelnia wymogi \
+FEDIAF dla karmy pelnoporcjowej? Jesli deklaracja "complete" ale brak \
+kluczowych skladnikow odzywczych = critical.
+- "Bez sztucznych konserwantow/barwnikow/aromatow" — sprawdz liste dodatkow \
+technologicznych. Naturalne konserwanty (tokoferole, ekstrakt rozmarynu) \
+i witaminy/mineraly sa dozwolone i NIE naruszaja tego claimu.
+- Claimy procentowe o swiezym miesie (np. "70% swiezego miesa") — \
+czy sklad to potwierdza? Pamietaj: "swiezy" oznacza przed obrobka, \
+po wysuszeniu moze byc 3-4x mniej.
+Dla kazdego claimu podaj: claim_text, claim_type \
+("original_recipe"/"vet_developed"/"single_protein"/\
+"complete_vs_complementary"/"no_artificial"/"fresh_meat_percentage"/"other"), \
+compliant (bool), regulation_reference, finding, issue_description, \
+recommendation, severity ("critical"/"warning"/"info").
+recipe_section_score: 0-100.
+
+SEKCJA 2 — NAZWY (EU 767/2009 Art.17 + FEDIAF CoGLP):
+A) REGULY PROCENTOWE — dla KAZDEGO skladnika wyroznionego w nazwie produktu:
+- Regula 100%: nazwa = sam skladnik (np. "Kurczak") = 95-100% tego skladnika \
+(w karmie mokrej) lub praktycznie wylacznie ten skladnik
+- Regula 26%: nazwa z opisem (np. "Obiad z kurczakiem", "Chicken Dinner") \
+= min 26% kurczaka
+- Regula 14%: "bogaty w X" / "rich in X" / "bogata w X" = min 14% skladnika X
+- Regula 4%: "z X" / "with X" / "ze smakiem X" = min 4% skladnika X
+- Ponizej 4%: "smak X" / "X flavour" = dopuszczalne bez minimalnego %
+Dla KAZDEGO wyroznionego skladnika podaj: product_name, \
+highlighted_ingredient, trigger_expression, applicable_rule \
+("100_pct"/"26_pct"/"14_pct"/"4_pct"/"flavour"/"none"), \
+required_minimum_percent, actual_percent (float lub null), compliant (bool), notes.
+
+B) SPOJNOSC NAZWY — sprawdz:
+- Nazwa vs typ karmy: np. "pasztet" / "pate" ale to karma sucha = niespojne (critical)
+- Nazwa vs gatunek: np. produkt "Cat Delight" ale brak oznaczenia gatunku na etykiecie
+- Nazwa vs etap zycia: np. "Puppy" w nazwie ale instrukcje karmienia dla doroslych
+- Deskryptory marketingowe: "Premium", "Gourmet", "Luxury", "Super Premium" — \
+czy uzasadnione skladem/jakoscia skladnikow? (FEDIAF CoGLP zaleca uzasadnienie)
+- Spojnosc wielojezykowa: czy nazwy w roznych jezykach na etykiecie sa spojne \
+(np. polska nazwa nie sugeruje czegos innego niz angielska)
+Dla kazdego sprawdzenia podaj: check_type \
+("name_vs_food_type"/"name_vs_species"/"name_vs_lifestage"/\
+"misleading_descriptor"/"multilang_consistency"), \
+description, finding, compliant (bool), issue_description, recommendation, \
+severity ("critical"/"warning"/"info").
+naming_section_score: 0-100.
+
+SEKCJA 3 — MARKA (brand name compliance):
+Przeanalizuj nazwe marki i elementy brandingowe pod katem:
+- "Bio"/"Organic"/"Ekologiczny"/"Oko" — wymaga certyfikacji EU 2018/848. \
+Czy na etykiecie jest logo EU organic leaf lub numer certyfikatu? \
+Jesli nie = critical (EU 2018/848 Art.30).
+- "Vet"/"Veterinary"/"Clinical"/"Kliniczny" — sugeruje dietetyczny srodek \
+specjalnego przeznaczenia zywieniowego (EU 2020/354). \
+Czy produkt ma taka klasyfikacje na etykiecie? Jesli nie = critical.
+- "Natural"/"Naturalny" — wg FEDIAF Code of Practice: brak chemicznie \
+syntetyzowanych skladnikow (dozwolone wyjatki: witaminy, skladniki mineralne, \
+aminokwasy). Sprawdz liste dodatkow. Jesli sa sztuczne = warning.
+- "Medical"/"Medicinal"/"Leczniczy"/"Terapeutyczny" — ZABRONIONE \
+per EU 767/2009 Art.13. Zawsze severity=critical.
+- Implikacje geograficzne w marce: np. "Scottish Farms", "Alpine Fresh", \
+"Nordic" — czy produkt faktycznie pochodzi z tego regionu? \
+Sprawdz kraj producenta na etykiecie. Jesli niezgodne = warning.
+- "Holistic" — termin nieuregulowany prawnie w paszach, \
+potencjalnie wprowadzajacy w blad. severity=info.
+- "Human-grade" / "Human grade" — nieuregulowane w legislacji paszowej EU, \
+potencjalnie misleading. severity=info.
+- Nazwy ras w marce/nazwie: np. "Labrador Diet", "Persian Formula" — \
+czy formulacja jest rzeczywiscie dostosowana do potrzeb rasy? \
+Jesli brak uzasadnienia = warning.
+Dla kazdego elementu podaj: brand_name, flagged_element, check_type \
+("bio_organic"/"vet_veterinary"/"natural"/"medical_forbidden"/\
+"country_origin"/"holistic"/"human_grade"/"breed_specific"/"other"), \
+regulation_reference, compliant (bool), issue_description, recommendation, \
+severity ("critical"/"warning"/"info").
+brand_section_score: 0-100.
+
+SEKCJA 4 — ZASTRZEZENIA / ZNAKI TOWAROWE (trademark / IP):
+Przeanalizuj etykiete pod katem potencjalnych naruszen wlasnosci intelektualnej:
+- Czy NAZWA PRODUKTU moze naruszac znane znaki towarowe w branzy pet food? \
+Porownaj z markami: Royal Canin, Hill's, Purina, Pedigree, Whiskas, Sheba, \
+Felix, Friskies, Eukanuba, Iams, Acana, Orijen, Taste of the Wild, \
+Farmina, Brit, Josera, Happy Dog, Happy Cat, Carnilove, Wolfsblut, \
+Applaws, Canidae, Merrick, Blue Buffalo, Wellness, Nutro.
+- Czy NAZWA RECEPTURY lub FORMULY nie jest zastrzezona? \
+Np. "ProPlan", "Science Diet", "Breed Health Nutrition" to zastrzezone nazwy.
+- Czy uzyte symbole (R) ® i TM ™ sa prawidlowo stosowane? \
+(R) = zarejestrowany znak towarowy (wymaga rejestracji w EUIPO/UPRP). \
+TM = niezarejestrowane roszczenie do znaku towarowego. \
+Sprawdz czy symbole sa uzyte przy wlasnych markach (poprawne) \
+czy przy cudzych (potencjalnie misleading).
+- Czy nazwy skladnikow nie sa zastrzezonymi markami handlowymi? \
+Np. "FOS" (Orafti), "Yucca Schidigera Extract" (Desert King), \
+"LID" (Natural Balance), "LifeSource Bits" (Blue Buffalo).
+- Flaguj nazwy ZBIEZNE fonetycznie lub wizualnie z znanymi markami \
+(np. "Royal Feast" vs "Royal Canin", "Hill Top" vs "Hill's").
+Dla kazdego elementu podaj: element_text, element_type \
+("product_name"/"recipe_name"/"ingredient_brand"/"symbol_usage"/"other"), \
+potential_owner, trademark_symbol_found ("registered"/"tm"/"none"), \
+risk_level ("high"/"medium"/"low"/"none"), \
+issue_description, recommendation, severity ("critical"/"warning"/"info").
+trademark_section_score: 0-100.
+
+SCORING:
+- recipe_section_score, naming_section_score, brand_section_score, \
+trademark_section_score: kazda sekcja 0-100
+- score = srednia wazona: receptury 25% + nazwy 30% + marka 25% + \
+zastrzezenia 20%, zaokraglona do int
+- overall_compliance: "compliant" jesli score>=90 I brak severity=critical, \
+"issues_found" jesli score>=60, "critical_issues" jesli score<60 \
+LUB jakikolwiek check ma severity=critical
+
+Odpowiedz WYLACZNIE poprawnym JSON (bez markdown). Badz ZWIEZLY. Pola:
+product_name, brand_name, product_classification, food_type, species, lifestage,
+ingredients_with_percentages (lista), additives_list (lista),
+recipe_claims_found (lista), recipe_claim_checks (lista RecipeClaimCheck),
+recipe_section_score,
+naming_convention_checks (lista NamingConventionCheck),
+name_consistency_checks (lista NameConsistencyCheck),
+naming_section_score,
+brand_compliance_checks (lista BrandComplianceCheck),
+brand_section_score,
+trademark_checks (lista TrademarkCheck),
+trademark_section_score,
+overall_compliance, score, summary (po polsku)."""
 
 
 # -- Label text generation prompt ------------------------------------------------

@@ -10,6 +10,7 @@ from pathlib import Path
 import streamlit as st
 
 from fediaf_verifier.export import (
+    artwork_inspection_to_text,
     claims_to_text,
     design_to_text,
     diff_to_text,
@@ -17,6 +18,7 @@ from fediaf_verifier.export import (
     label_text_to_text,
     linguistic_to_text,
     market_check_to_text,
+    presentation_to_text,
     product_description_to_text,
     structure_to_text,
     to_json,
@@ -562,13 +564,33 @@ def render_linguistic_report(
         st.subheader("Znalezione problemy")
         from html import escape as _esc
 
+        _CONF_BADGES = {
+            "high": (
+                '<span style="background:#22c55e;color:#fff;padding:1px 6px;'
+                'border-radius:4px;font-size:0.7rem;margin-left:6px;">'
+                "potwierdzone</span>"
+            ),
+            "medium": (
+                '<span style="background:#eab308;color:#fff;padding:1px 6px;'
+                'border-radius:4px;font-size:0.7rem;margin-left:6px;">'
+                "do weryfikacji</span>"
+            ),
+            "low": (
+                '<span style="background:#ef4444;color:#fff;padding:1px 6px;'
+                'border-radius:4px;font-size:0.7rem;margin-left:6px;">'
+                "mo\u017cliwa halucynacja</span>"
+            ),
+        }
         for li in lr.issues:
             icon = _ISSUE_ICONS.get(li.issue_type, "\u2022")
             label = _ISSUE_LABELS.get(li.issue_type, li.issue_type)
+            conf = getattr(li, "confidence", "medium")
+            conf_badge = _CONF_BADGES.get(conf, "")
             st.markdown(
                 f"{icon} **[{label}]** "
                 f'<s>{_esc(li.original)}</s> \u2192 '
-                f"<strong>{_esc(li.suggestion)}</strong>  \n"
+                f"<strong>{_esc(li.suggestion)}</strong>"
+                f"{conf_badge}  \n"
                 f'<span style="opacity:0.6;font-size:0.85rem;">'
                 f"{_esc(li.explanation)}</span>",
                 unsafe_allow_html=True,
@@ -1018,7 +1040,7 @@ def render_design_report(result, filename: str) -> None:
                 unsafe_allow_html=True,
             )
 
-    # Competitive benchmarks
+    # Competitive benchmarks (AI-generated, qualitative)
     if r.competitive_benchmarks:
         with st.expander(
             f"\U0001f4ca Benchmark konkurencyjny ({len(r.competitive_benchmarks)})"
@@ -1030,6 +1052,78 @@ def render_design_report(result, filename: str) -> None:
                 c2.write(f"Standard: {bm.industry_standard}")
                 st.write(f"\u2192 {bm.suggestion}")
                 st.divider()
+
+    # Quantitative benchmark comparisons (radar chart + table)
+    if r.benchmark_comparisons:
+        _VERDICT_LABELS = {
+            "excellent": ("\U0001f7e2", "Doskonaly"),
+            "above_average": ("\U0001f7e2", "Powyzej sredniej"),
+            "average": ("\U0001f7e1", "Sredni"),
+            "below_average": ("\U0001f534", "Ponizej sredniej"),
+        }
+        segment_label = r.benchmark_comparisons[0].segment if r.benchmark_comparisons else ""
+
+        with st.expander(
+            f"\U0001f4ca Benchmark vs segment: {segment_label}", expanded=True
+        ):
+            # Radar chart using plotly (needs >= 3 categories for a polygon)
+            try:
+                import plotly.graph_objects as go
+
+                if len(r.benchmark_comparisons) < 3:
+                    raise ValueError("Za malo kategorii dla wykresu radarowego")
+
+                categories = [bc.category_name for bc in r.benchmark_comparisons]
+                scores = [bc.score for bc in r.benchmark_comparisons]
+                medians = [bc.benchmark_median for bc in r.benchmark_comparisons]
+                highs = [bc.benchmark_high for bc in r.benchmark_comparisons]
+
+                # Close the radar polygon
+                categories_closed = categories + [categories[0]]
+                scores_closed = scores + [scores[0]]
+                medians_closed = medians + [medians[0]]
+                highs_closed = highs + [highs[0]]
+
+                fig = go.Figure()
+                fig.add_trace(go.Scatterpolar(
+                    r=highs_closed, theta=categories_closed,
+                    fill="toself", name="Top 25% branzy",
+                    opacity=0.15, line=dict(color="#00b464", dash="dot"),
+                ))
+                fig.add_trace(go.Scatterpolar(
+                    r=medians_closed, theta=categories_closed,
+                    fill="toself", name="Mediana branzy",
+                    opacity=0.2, line=dict(color="#ffb400"),
+                ))
+                fig.add_trace(go.Scatterpolar(
+                    r=scores_closed, theta=categories_closed,
+                    fill="toself", name="Twoja etykieta",
+                    opacity=0.4, line=dict(color="#3b82f6", width=2),
+                ))
+                fig.update_layout(
+                    polar=dict(radialaxis=dict(visible=True, range=[0, 100])),
+                    showlegend=True,
+                    height=420,
+                    margin=dict(l=60, r=60, t=30, b=30),
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            except ImportError:
+                st.caption("Zainstaluj plotly dla wykresu radarowego: pip install plotly")
+            except ValueError:
+                pass  # < 3 categories, skip chart, table below is enough
+
+            # Table
+            for bc in r.benchmark_comparisons:
+                icon, label = _VERDICT_LABELS.get(bc.verdict, ("\u26aa", _esc(bc.verdict)))
+                st.markdown(
+                    f"{icon} **{_esc(bc.category_name)}**: {bc.score}/100 "
+                    f"(percentyl: {bc.percentile}) — {label}  \n"
+                    f'<span style="opacity:0.6;font-size:0.85rem;">'
+                    f"Segment {_esc(bc.segment)}: "
+                    f"p25={bc.benchmark_low} | mediana={bc.benchmark_median} "
+                    f"| p75={bc.benchmark_high}</span>",
+                    unsafe_allow_html=True,
+                )
 
     # Trend alignment
     if r.trend_alignment:
@@ -1289,6 +1383,265 @@ def render_claims_report(result, filename: str) -> None:
         "\u2b07\ufe0f Raport claim\u00f3w (TXT)",
         data=claims_to_text(result, filename),
         file_name=f"claimy_{stem}.txt",
+        mime="text/plain",
+        use_container_width=True,
+    )
+
+
+# -- Render presentation compliance report ----------------------------------------
+
+
+def render_presentation_report(result, filename: str) -> None:
+    """Render commercial presentation compliance check results."""
+    st.divider()
+
+    if not result.performed or not result.report:
+        st.error(
+            f"**Walidacja prezentacji handlowej nie powiodła się.**\n\n"
+            f"{result.error or 'Nieznany błąd.'}"
+        )
+        return
+
+    r = result.report
+
+    # Banner
+    _COMPLIANCE_MAP = {
+        "compliant": (
+            "success",
+            "\u2705 Prezentacja handlowa zgodna z regulacjami.",
+        ),
+        "issues_found": (
+            "warning",
+            "\u26a0\ufe0f Wykryto niezgodności w prezentacji handlowej.",
+        ),
+        "critical_issues": (
+            "error",
+            "\u26d4 Krytyczne problemy z prezentacją — wymagana korekta.",
+        ),
+    }
+    banner_type, banner_msg = _COMPLIANCE_MAP.get(
+        r.overall_compliance, ("info", r.overall_compliance)
+    )
+    getattr(st, banner_type)(banner_msg)
+
+    # Metrics — 4 section scores
+    mc1, mc2, mc3, mc4 = st.columns(4)
+    mc1.metric("Receptury", f"{r.recipe_section_score}/100")
+    mc2.metric("Nazwy", f"{r.naming_section_score}/100")
+    mc3.metric("Marka", f"{r.brand_section_score}/100")
+    mc4.metric("Zastrzeżenia", f"{r.trademark_section_score}/100")
+
+    # Overall score bar
+    bar_color = (
+        "#00b464" if r.score >= 90
+        else ("#ffb400" if r.score >= 70 else "#dc3232")
+    )
+    st.markdown(
+        f'<div class="score-bar-bg">'
+        f'<div class="score-bar-fill" style="width:{r.score}%;'
+        f'background:{bar_color}"></div></div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(f"**Wynik ogólny: {r.score}/100**")
+
+    if r.summary:
+        st.caption(r.summary)
+
+    # Product context expander
+    with st.expander("Kontekst produktu", expanded=False):
+        ctx_c1, ctx_c2 = st.columns(2)
+        ctx_c1.write(f"**Nazwa produktu:** {_esc(r.product_name or 'brak danych')}")
+        ctx_c1.write(f"**Marka:** {_esc(r.brand_name or 'brak danych')}")
+        ctx_c1.write(
+            f"**Klasyfikacja:** {_esc(r.product_classification or 'brak danych')}"
+        )
+        ctx_c2.write(f"**Typ karmy:** {_esc(r.food_type or 'brak danych')}")
+        ctx_c2.write(f"**Gatunek:** {_esc(r.species or 'brak danych')}")
+        ctx_c2.write(f"**Etap życia:** {_esc(r.lifestage or 'brak danych')}")
+        if r.ingredients_with_percentages:
+            st.write("**Składniki z %:**")
+            for ing in r.ingredients_with_percentages:
+                st.write(f"- {_esc(ing)}")
+        if r.additives_list:
+            st.write("**Dodatki:**")
+            for add in r.additives_list:
+                st.write(f"- {_esc(add)}")
+
+    _SEV_ICONS = {
+        "critical": "\U0001f534",
+        "warning": "\U0001f7e1",
+        "info": "\U0001f535",
+    }
+
+    # Tabs for 4 sections
+    tab_rec, tab_name, tab_brand, tab_tm = st.tabs([
+        f"Receptury ({r.recipe_section_score})",
+        f"Nazwy ({r.naming_section_score})",
+        f"Marka ({r.brand_section_score})",
+        f"Zastrzeżenia ({r.trademark_section_score})",
+    ])
+
+    # -- Tab 1: Recipes --------------------------------------------------------
+    with tab_rec:
+        if r.recipe_claims_found:
+            st.write(
+                f"**Znalezione claimy recepturowe:** "
+                f"{len(r.recipe_claims_found)}"
+            )
+            for claim in r.recipe_claims_found:
+                st.write(f"- {_esc(claim)}")
+
+        if r.recipe_claim_checks:
+            for rc in r.recipe_claim_checks:
+                icon = (
+                    "\u2705" if rc.compliant
+                    else _SEV_ICONS.get(rc.severity, "\u274c")
+                )
+                with st.expander(
+                    f"{icon} {_esc(rc.claim_text)}",
+                    expanded=not rc.compliant,
+                ):
+                    c1, c2 = st.columns(2)
+                    c1.write(f"**Typ:** {_esc(rc.claim_type)}")
+                    c2.write(
+                        f"**Status:** "
+                        f"{'Zgodny' if rc.compliant else 'Niezgodny'}"
+                    )
+                    if rc.regulation_reference:
+                        st.write(
+                            f"**Podstawa prawna:** "
+                            f"{_esc(rc.regulation_reference)}"
+                        )
+                    if rc.finding:
+                        st.write(f"**Ustalenie:** {_esc(rc.finding)}")
+                    if not rc.compliant and rc.issue_description:
+                        st.warning(f"\u26a0\ufe0f {_esc(rc.issue_description)}")
+                    if rc.recommendation:
+                        st.info(f"\u2192 {_esc(rc.recommendation)}")
+        elif not r.recipe_claims_found:
+            st.info("Brak claimów recepturowych na etykiecie.")
+
+    # -- Tab 2: Names ----------------------------------------------------------
+    with tab_name:
+        # A) Naming convention (% rules)
+        if r.naming_convention_checks:
+            st.markdown("##### Reguły procentowe (EU 767/2009 Art.17)")
+            for nc in r.naming_convention_checks:
+                icon = "\u2705" if nc.compliant else "\u274c"
+                with st.expander(
+                    f"{icon} {_esc(nc.highlighted_ingredient)} "
+                    f"— \"{_esc(nc.trigger_expression)}\" "
+                    f"({nc.applicable_rule})",
+                    expanded=not nc.compliant,
+                ):
+                    st.write(f"**Nazwa produktu:** {_esc(nc.product_name)}")
+                    st.write(
+                        f"**Wymagane:** min {nc.required_minimum_percent}%"
+                    )
+                    if nc.actual_percent is not None:
+                        st.write(f"**Znalezione:** {nc.actual_percent}%")
+                    else:
+                        st.write("**Znalezione:** brak danych na etykiecie")
+                    if nc.notes:
+                        st.caption(nc.notes)
+
+        # B) Name consistency
+        if r.name_consistency_checks:
+            st.markdown("##### Spójność nazwy")
+            for ncc in r.name_consistency_checks:
+                icon = (
+                    "\u2705" if ncc.compliant
+                    else _SEV_ICONS.get(ncc.severity, "\u274c")
+                )
+                with st.expander(
+                    f"{icon} {_esc(ncc.check_type)}: {_esc(ncc.description)}",
+                    expanded=not ncc.compliant,
+                ):
+                    if ncc.finding:
+                        st.write(f"**Ustalenie:** {_esc(ncc.finding)}")
+                    if not ncc.compliant and ncc.issue_description:
+                        st.warning(f"\u26a0\ufe0f {_esc(ncc.issue_description)}")
+                    if ncc.recommendation:
+                        st.info(f"\u2192 {_esc(ncc.recommendation)}")
+
+        if not r.naming_convention_checks and not r.name_consistency_checks:
+            st.info("Brak elementów do weryfikacji w nazewnictwie.")
+
+    # -- Tab 3: Brand ----------------------------------------------------------
+    with tab_brand:
+        if r.brand_compliance_checks:
+            for bc in r.brand_compliance_checks:
+                icon = (
+                    "\u2705" if bc.compliant
+                    else _SEV_ICONS.get(bc.severity, "\u274c")
+                )
+                with st.expander(
+                    f"{icon} \"{_esc(bc.flagged_element)}\" "
+                    f"({_esc(bc.check_type)})",
+                    expanded=not bc.compliant,
+                ):
+                    st.write(f"**Marka:** {_esc(bc.brand_name)}")
+                    if bc.regulation_reference:
+                        st.write(
+                            f"**Podstawa prawna:** "
+                            f"{_esc(bc.regulation_reference)}"
+                        )
+                    st.write(
+                        f"**Status:** "
+                        f"{'Zgodny' if bc.compliant else 'Niezgodny'}"
+                    )
+                    if not bc.compliant and bc.issue_description:
+                        st.warning(f"\u26a0\ufe0f {_esc(bc.issue_description)}")
+                    if bc.recommendation:
+                        st.info(f"\u2192 {_esc(bc.recommendation)}")
+        else:
+            st.info("Brak elementów do weryfikacji w marce.")
+
+    # -- Tab 4: Trademarks -----------------------------------------------------
+    with tab_tm:
+        _RISK_COLORS = {
+            "high": "\U0001f534",
+            "medium": "\U0001f7e1",
+            "low": "\U0001f7e0",
+            "none": "\u2705",
+        }
+        if r.trademark_checks:
+            for tc in r.trademark_checks:
+                risk_icon = _RISK_COLORS.get(tc.risk_level, "\u2753")
+                with st.expander(
+                    f"{risk_icon} \"{_esc(tc.element_text)}\" "
+                    f"({_esc(tc.element_type)})",
+                    expanded=tc.risk_level in ("high", "medium"),
+                ):
+                    st.write(f"**Poziom ryzyka:** {_esc(tc.risk_level)}")
+                    if tc.potential_owner:
+                        st.write(
+                            f"**Potencjalny właściciel:** "
+                            f"{_esc(tc.potential_owner)}"
+                        )
+                    if (
+                        tc.trademark_symbol_found
+                        and tc.trademark_symbol_found != "none"
+                    ):
+                        sym = (
+                            "\u00ae" if tc.trademark_symbol_found == "registered"
+                            else "\u2122"
+                        )
+                        st.write(f"**Symbol na etykiecie:** {sym}")
+                    if tc.issue_description:
+                        st.warning(f"\u26a0\ufe0f {_esc(tc.issue_description)}")
+                    if tc.recommendation:
+                        st.info(f"\u2192 {_esc(tc.recommendation)}")
+        else:
+            st.info("Brak potencjalnych naruszeń znaków towarowych.")
+
+    # Export
+    st.divider()
+    stem = Path(filename).stem
+    st.download_button(
+        "\u2b07\ufe0f Raport prezentacji handlowej (TXT)",
+        data=presentation_to_text(result, filename),
+        file_name=f"prezentacja_{stem}.txt",
         mime="text/plain",
         use_container_width=True,
     )
@@ -1851,3 +2204,438 @@ def render_diff_report(
         mime="text/plain",
         use_container_width=True,
     )
+
+
+# -- Render artwork inspection report ---------------------------------------------------
+def render_artwork_inspection_report(
+    result, filename_a: str, filename_b: str = "",
+) -> None:
+    """Render artwork inspection results: pixel diff, colors, print readiness."""
+    import base64
+
+    st.divider()
+
+    if not result.performed or not result.report:
+        st.error(
+            f"**Inspekcja artwork nie powiod\u0142a si\u0119.**\n\n"
+            f"{result.error or 'Nieznany b\u0142\u0105d.'}"
+        )
+        return
+
+    r = result.report
+    score = r.overall_score
+
+    # Banner
+    if r.overall_verdict == "pass":
+        st.success(f"\u2705 **Inspekcja pozytywna \u2014 {score}/100**")
+    elif r.overall_verdict == "review":
+        st.warning(f"\u26a0\ufe0f **Wymaga przegl\u0105du \u2014 {score}/100**")
+    else:
+        st.error(f"\u26d4 **Inspekcja negatywna \u2014 {score}/100**")
+
+    # Hints about missing optional features
+    from fediaf_verifier.deps import is_available
+
+    _missing_hints = []
+    if not r.ocr_comparison and not is_available("ocr"):
+        _missing_hints.append(
+            "\U0001f4dd **OCR text comparison** \u2014 "
+            "zainstaluj w panelu bocznym (\u2699\ufe0f Dodatkowe funkcje)"
+        )
+    if not r.saliency and not is_available("saliency"):
+        _missing_hints.append(
+            "\U0001f441\ufe0f **Analiza uwagi wizualnej (DeepGaze)** \u2014 "
+            "zainstaluj w panelu bocznym (\u2699\ufe0f Dodatkowe funkcje)"
+        )
+    if _missing_hints:
+        with st.expander(
+            f"\U0001f4e6 Dost\u0119pne rozszerzenia ({len(_missing_hints)})",
+            expanded=False,
+        ):
+            for hint in _missing_hints:
+                st.markdown(hint)
+
+    # Metrics row
+    n_print_issues = len(r.print_readiness.issues) if r.print_readiness else 0
+    n_color_mismatches = (
+        sum(1 for c in r.color_analysis.comparisons if c.verdict == "mismatch")
+        if r.color_analysis else 0
+    )
+    mc1, mc2, mc3, mc4 = st.columns(4)
+    mc1.metric("Ocena", f"{score}/100")
+    mc2.metric("Problemy druku", str(n_print_issues))
+    mc3.metric(
+        "SSIM",
+        f"{r.pixel_diff.ssim_score:.3f}" if r.pixel_diff else "N/A",
+    )
+    mc4.metric("Kolory mismatch", str(n_color_mismatches))
+
+    # Score bar
+    bar_color = "#00b464" if score >= 85 else ("#ffb400" if score >= 60 else "#dc3232")
+    st.markdown(
+        f'<div style="background:#e0e0e0;border-radius:6px;height:12px;margin:8px 0 16px;">'
+        f'<div style="width:{score}%;background:{bar_color};'
+        f'height:100%;border-radius:6px;"></div></div>',
+        unsafe_allow_html=True,
+    )
+
+    # Tabs
+    tab_names = ["\U0001f5a8\ufe0f Gotowosc do druku", "\U0001f3a8 Kolory"]
+    if r.pixel_diff:
+        tab_names.append("\U0001f50d Pixel diff")
+    if r.ocr_comparison:
+        tab_names.append("\U0001f4dd Tekst OCR")
+    if r.icc_profile:
+        tab_names.append("\U0001f3a8 ICC profil")
+    if r.saliency:
+        tab_names.append("\U0001f441\ufe0f Uwaga wizualna")
+    tab_names.append("\U0001f916 Podsumowanie AI")
+
+    tabs = st.tabs(tab_names)
+    tab_idx = 0
+
+    # ---- Print readiness tab ----
+    with tabs[tab_idx]:
+        tab_idx += 1
+        if r.print_readiness:
+            pr = r.print_readiness
+            pr_status = "\u2705 Gotowy do druku" if pr.print_ready else "\u274c Nie gotowy"
+            st.subheader(f"{pr_status} ({pr.score}/100)")
+
+            c1, c2, c3 = st.columns(3)
+            c1.metric("DPI", f"{pr.dpi:.0f}" if pr.dpi > 0 else "brak danych")
+            c2.metric("Kolory", pr.color_space)
+            c3.metric("Format", pr.file_format)
+
+            info_cols = st.columns(4)
+            info_cols[0].markdown(
+                f"**DPI:** {'OK' if pr.dpi_sufficient else 'Za niskie'}"
+            )
+            info_cols[1].markdown(
+                f"**CMYK:** {'Tak' if pr.color_space_print_ready else 'Nie'}"
+            )
+            info_cols[2].markdown(
+                f"**Bleed:** {'Tak' if pr.has_bleed else 'Nie'}"
+            )
+            if pr.fonts_embedded is not None:
+                info_cols[3].markdown(
+                    f"**Fonty:** {'Osadzone' if pr.fonts_embedded else 'Brak!'}"
+                )
+            if pr.page_size_mm:
+                st.caption(
+                    f"Rozmiar: {pr.page_size_mm[0]:.1f} \u00d7 "
+                    f"{pr.page_size_mm[1]:.1f} mm"
+                )
+
+            if pr.issues:
+                _SEV_I = {
+                    "critical": "\U0001f534",
+                    "warning": "\U0001f7e1",
+                    "info": "\U0001f535",
+                }
+                for iss in pr.issues:
+                    icon = _SEV_I.get(iss.severity, "\u26aa")
+                    with st.expander(
+                        f"{icon} {iss.description}",
+                        expanded=iss.severity == "critical",
+                    ):
+                        if iss.recommendation:
+                            st.write(f"\u2192 {iss.recommendation}")
+                        if iss.value_found:
+                            st.caption(
+                                f"Znaleziono: {iss.value_found} "
+                                f"| Wymagane: {iss.value_expected}"
+                            )
+        else:
+            st.info("Brak analizy gotowo\u015bci do druku.")
+
+    # ---- Color analysis tab ----
+    with tabs[tab_idx]:
+        tab_idx += 1
+        if r.color_analysis:
+            ca = r.color_analysis
+            st.subheader(
+                f"Paleta kolorow ({ca.color_space_detected})"
+            )
+
+            # Show color swatches
+            swatch_html = ""
+            for c in ca.dominant_colors:
+                swatch_html += (
+                    f'<div style="display:inline-block;margin:4px;">'
+                    f'<div style="width:48px;height:48px;background:{c.hex};'
+                    f'border:1px solid #ccc;border-radius:6px;"></div>'
+                    f'<div style="font-size:0.7rem;text-align:center;">'
+                    f'{c.hex}<br>{c.percentage:.0f}%</div></div>'
+                )
+            st.markdown(swatch_html, unsafe_allow_html=True)
+
+            # Color comparisons
+            if ca.comparisons:
+                st.subheader("Por\u00f3wnanie kolorow (Delta E CIE2000)")
+                st.metric(
+                    "Spojnosc kolorow",
+                    f"{ca.color_consistency_score:.0f}/100",
+                )
+                for comp in ca.comparisons:
+                    if comp.verdict == "match":
+                        icon = "\u2705"
+                    elif comp.verdict == "close":
+                        icon = "\U0001f7e1"
+                    else:
+                        icon = "\U0001f534"
+                    st.markdown(
+                        f"{icon} `{comp.color_a_hex}` \u2192 "
+                        f"`{comp.color_b_hex}` "
+                        f"\u2014 \u0394E = **{comp.delta_e:.2f}** "
+                        f"({comp.verdict})"
+                    )
+        else:
+            st.info("Brak analizy kolorow.")
+
+    # ---- Pixel diff tab ----
+    if r.pixel_diff:
+        with tabs[tab_idx]:
+            tab_idx += 1
+            pd = r.pixel_diff
+            _VERD_LABELS = {
+                "identical": "\u2705 Identyczne",
+                "minor_changes": "\U0001f7e1 Drobne zmiany",
+                "significant_changes": "\U0001f7e0 Istotne zmiany",
+                "major_changes": "\U0001f534 Du\u017ce zmiany",
+            }
+            st.subheader(
+                _VERD_LABELS.get(pd.verdict, pd.verdict)
+            )
+
+            vc1, vc2, vc3 = st.columns(3)
+            vc1.metric("SSIM", f"{pd.ssim_score:.4f}")
+            vc2.metric("Zmienione px", f"{pd.changed_pixels_pct:.2f}%")
+            vc3.metric("Regiony zmian", str(len(pd.diff_regions)))
+
+            # Diff overlay image
+            if pd.diff_image_b64:
+                try:
+                    diff_bytes = base64.b64decode(pd.diff_image_b64)
+                    st.image(
+                        diff_bytes,
+                        caption="Mapa roznic (czerwony = zmiana)",
+                        use_container_width=True,
+                    )
+                except Exception:
+                    st.warning("Nie uda\u0142o si\u0119 wy\u015bwietli\u0107 mapy r\u00f3\u017cnic.")
+
+            if pd.diff_regions:
+                st.caption(f"Wykryte regiony zmian: {len(pd.diff_regions)}")
+                for i, reg in enumerate(pd.diff_regions, 1):
+                    st.write(
+                        f"{i}. Pozycja [{reg.x}, {reg.y}] "
+                        f"rozmiar {reg.w}\u00d7{reg.h} px "
+                        f"\u2014 zmiana: {reg.change_pct:.1f}%"
+                    )
+
+    # ---- OCR text comparison tab ----
+    if r.ocr_comparison:
+        with tabs[tab_idx]:
+            tab_idx += 1
+            ocr = r.ocr_comparison
+            st.subheader(
+                f"Por\u00f3wnanie tekstu \u2014 {ocr.similarity_pct:.1f}% zgodno\u015bci"
+            )
+
+            oc1, oc2, oc3 = st.columns(3)
+            oc1.metric("Podobienstwo", f"{ocr.similarity_pct:.1f}%")
+            oc2.metric("Zmiany", str(ocr.total_changes))
+            oc3.metric(
+                "Pewnosc OCR",
+                f"{(ocr.avg_confidence_a + ocr.avg_confidence_b) / 2:.0%}",
+            )
+
+            if ocr.changes:
+                _CHANGE_ICONS_OCR = {
+                    "added": "\U0001f7e2",
+                    "removed": "\U0001f534",
+                    "modified": "\U0001f7e1",
+                }
+                for ch in ocr.changes:
+                    icon = _CHANGE_ICONS_OCR.get(ch.change_type, "\u26aa")
+                    label = {
+                        "added": "Dodano",
+                        "removed": "Usuni\u0119to",
+                        "modified": "Zmieniono",
+                    }.get(ch.change_type, ch.change_type)
+                    with st.expander(
+                        f"{icon} [{label}] linia {ch.line_number}",
+                        expanded=ch.change_type != "added",
+                    ):
+                        if ch.old_text:
+                            st.markdown(
+                                f'<div style="background:rgba(220,50,50,0.08);'
+                                f'padding:8px 12px;border-radius:6px;margin-bottom:8px;">'
+                                f'<s>{_esc(ch.old_text)}</s></div>',
+                                unsafe_allow_html=True,
+                            )
+                        if ch.new_text:
+                            st.markdown(
+                                f'<div style="background:rgba(0,180,100,0.08);'
+                                f'padding:8px 12px;border-radius:6px;">'
+                                f'<strong>{_esc(ch.new_text)}</strong></div>',
+                                unsafe_allow_html=True,
+                            )
+            else:
+                st.success("Brak r\u00f3\u017cnic tekstowych.")
+
+            with st.expander("Pelny tekst (master)"):
+                st.code(ocr.text_a or "(brak tekstu)", language=None)
+            with st.expander("Pelny tekst (proof)"):
+                st.code(ocr.text_b or "(brak tekstu)", language=None)
+
+    # ---- ICC profile tab ----
+    if r.icc_profile:
+        with tabs[tab_idx]:
+            tab_idx += 1
+            icc = r.icc_profile
+            if icc.has_profile:
+                st.success(f"\u2705 Profil ICC: {icc.profile_name or 'znaleziony'}")
+                ic1, ic2, ic3 = st.columns(3)
+                ic1.metric("Przestrzen", icc.color_space or "?")
+                ic2.metric("Rendering", icc.rendering_intent or "?")
+                ic3.metric("PCS", icc.pcs or "?")
+            else:
+                st.warning("\u26a0\ufe0f Brak profilu ICC")
+
+            if icc.issues:
+                for iss in icc.issues:
+                    st.warning(iss)
+
+            if r.icc_profile_b:
+                st.divider()
+                icc_b = r.icc_profile_b
+                st.subheader("Profil ICC (proof)")
+                if icc_b.has_profile:
+                    st.success(f"Profil: {icc_b.profile_name or 'znaleziony'} ({icc_b.color_space})")
+                else:
+                    st.warning("Brak profilu ICC w pliku proof")
+                if icc_b.issues:
+                    for iss in icc_b.issues:
+                        st.warning(iss)
+
+    # ---- Saliency tab ----
+    if r.saliency:
+        with tabs[tab_idx]:
+            tab_idx += 1
+            sal = r.saliency
+            st.subheader(f"Analiza uwagi wizualnej ({sal.model_used})")
+
+            # --- Main metrics row ---
+            mc1, mc2, mc3, mc4 = st.columns(4)
+            mc1.metric("Focus", f"{sal.focus_score:.0f}/100")
+            if sal.clarity:
+                mc2.metric("Czytelnosc", f"{sal.clarity.score:.0f}/100")
+            if sal.cognitive_load:
+                mc3.metric("Latwosc przetwarzania", f"{sal.cognitive_load.ease_score:.0f}/100")
+            mc4.metric("Regiony uwagi", str(len(sal.attention_regions)))
+
+            st.caption(
+                "Focus = koncentracja uwagi | Czytelnosc = porzadek wizualny "
+                "| Latwosc przetwarzania = niski wysilek mentalny "
+                "(estymacja heurystyczna)"
+            )
+
+            if sal.heatmap_b64:
+                try:
+                    hm_bytes = base64.b64decode(sal.heatmap_b64)
+                    st.image(
+                        hm_bytes,
+                        caption="Heatmapa uwagi (ciep\u0142e = wysoka uwaga)",
+                        use_container_width=True,
+                    )
+                except Exception:
+                    st.warning("Nie udalo sie wyswietlic heatmapy.")
+
+            # --- Focus details ---
+            if sal.focus_metrics:
+                with st.expander("Szczegoly Focus Score"):
+                    fm = sal.focus_metrics
+                    fc1, fc2, fc3 = st.columns(3)
+                    fc1.metric("Entropia", f"{fm.entropy:.0f}/100",
+                               help="Niska entropia = uwaga skoncentrowana w malej liczbie punktow")
+                    fc2.metric("Gini", f"{fm.gini:.2f}",
+                               help="Wysoki wspolczynnik Gini = wieksza nierownosc (koncentracja)")
+                    fc3.metric("Klastry uwagi", str(fm.cluster_count),
+                               help="Mniej klastrow = bardziej skoncentrowana uwaga")
+
+            # --- Clarity details ---
+            if sal.clarity:
+                with st.expander("Szczegoly Czytelnosci"):
+                    cl = sal.clarity
+                    cc1, cc2, cc3, cc4 = st.columns(4)
+                    cc1.metric("Gestosc krawedzi", f"{cl.edge_density:.3f}",
+                               help="Nizsza = czystszy design (< 0.05 = dobrze)")
+                    cc2.metric("Kolory dominujace", str(cl.color_complexity),
+                               help="Mniej = spojniejsza paleta (2-4 = optymalnie)")
+                    cc3.metric("Biala przestrzen", f"{cl.whitespace_ratio:.0%}",
+                               help="Wiecej = lzejszy, czytelniejszy design")
+                    cc4.metric("Symetria", f"{cl.symmetry:.2f}",
+                               help="Korelacja lewa-prawa (1.0 = idealnie symetryczny)")
+
+            # --- Cognitive Load details ---
+            if sal.cognitive_load:
+                with st.expander("Szczegoly Obciazenia Kognitywnego"):
+                    cg = sal.cognitive_load
+                    cg1, cg2, cg3, cg4 = st.columns(4)
+                    cg1.metric("Zlozonosc czestotl.", f"{cg.frequency_complexity:.2f}",
+                               help="Energia wysokich czestotliwosci — drobne detale i tekstury")
+                    cg2.metric("Elementy wizualne", str(cg.element_count),
+                               help="Liczba odrębnych elementow na etykiecie")
+                    cg3.metric("Roznorodnosc kolorow", f"{cg.color_diversity:.2f}",
+                               help="Rozklad odcieni chromatycznych (0-1)")
+                    cg4.metric("Gestosc krawedzi", f"{cg.edge_density:.3f}",
+                               help="Wspoldzielona z metryką czytelnosci")
+
+            # --- Attention regions ---
+            if sal.attention_regions:
+                st.subheader("Top regiony uwagi")
+                for reg in sal.attention_regions:
+                    st.write(
+                        f"**#{reg.rank}** \u2014 {reg.attention_pct:.1f}% uwagi "
+                        f"[{reg.x},{reg.y} {reg.w}\u00d7{reg.h}px]"
+                    )
+
+    # ---- AI Summary tab ----
+    with tabs[tab_idx]:
+        if r.ai_summary:
+            st.subheader("Podsumowanie AI")
+            st.info(r.ai_summary)
+        if r.ai_recommendations:
+            st.subheader("Rekomendacje")
+            for i, rec in enumerate(r.ai_recommendations, 1):
+                st.write(f"{i}. {rec}")
+        if not r.ai_summary and not r.ai_recommendations:
+            st.info("Podsumowanie AI niedost\u0119pne.")
+
+    # Export
+    st.divider()
+    stem_a = Path(filename_a).stem
+    col_a, col_b = st.columns(2)
+    with col_a:
+        st.download_button(
+            "\u2b07\ufe0f Raport (TXT)",
+            data=artwork_inspection_to_text(result, filename_a, filename_b),
+            file_name=f"artwork_{stem_a}.txt",
+            mime="text/plain",
+            use_container_width=True,
+        )
+    with col_b:
+        json_data = result.report.model_dump_json(
+            indent=2,
+            exclude_none=True,
+            exclude={"pixel_diff": {"diff_image_b64"}},
+        )
+        st.download_button(
+            "\u2b07\ufe0f Raport (JSON)",
+            data=json_data,
+            file_name=f"artwork_{stem_a}.json",
+            mime="application/json",
+            use_container_width=True,
+        )

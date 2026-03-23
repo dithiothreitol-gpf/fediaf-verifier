@@ -2,6 +2,7 @@
 
 
 from fediaf_verifier.models import (
+    ArtworkInspectionResult,
     ClaimsCheckResult,
     DesignAnalysisResult,
     EANCheckResult,
@@ -11,6 +12,7 @@ from fediaf_verifier.models import (
     LabelTextResult,
     LinguisticCheckResult,
     MarketCheckResult,
+    PresentationCheckResult,
     ProductDescriptionResult,
     TranslationResult,
 )
@@ -542,7 +544,7 @@ def design_to_text(
                 lines.append(f"    Lokalizacja: {issue.location}")
         lines.append("")
 
-    # Competitive benchmarks
+    # Competitive benchmarks (AI qualitative)
     if r.competitive_benchmarks:
         lines.append("BENCHMARK KONKURENCYJNY:")
         lines.append("-" * 40)
@@ -551,6 +553,20 @@ def design_to_text(
             lines.append(f"    Obecny poziom:    {bm.current_level}")
             lines.append(f"    Standard branzy:  {bm.industry_standard}")
             lines.append(f"    -> {bm.suggestion}")
+        lines.append("")
+
+    # Quantitative benchmarks
+    if r.benchmark_comparisons:
+        seg = r.benchmark_comparisons[0].segment if r.benchmark_comparisons else "?"
+        lines.append(f"BENCHMARK ILOSCIOWY (segment: {seg}):")
+        lines.append("-" * 40)
+        for bc in r.benchmark_comparisons:
+            lines.append(
+                f"  {bc.category_name}: {bc.score}/100 "
+                f"(percentyl: {bc.percentile}, "
+                f"p25={bc.benchmark_low} med={bc.benchmark_median} "
+                f"p75={bc.benchmark_high}) — {bc.verdict}"
+            )
         lines.append("")
 
     # Trends
@@ -747,6 +763,209 @@ def claims_to_text(result: ClaimsCheckResult, filename: str) -> str:
         )
         for tc in r.therapeutic_claims_found:
             lines.append(f"  ! {tc}")
+        lines.append("")
+
+    lines.extend([
+        "=" * 60,
+        "Raport wygenerowany automatycznie. BULT Quality Assurance.",
+        "=" * 60,
+    ])
+
+    return "\n".join(lines)
+
+
+def presentation_to_text(
+    result: PresentationCheckResult, filename: str,
+) -> str:
+    """Format commercial presentation compliance check as human-readable text."""
+    lines = [
+        "=" * 60,
+        "WALIDACJA PREZENTACJI HANDLOWEJ",
+        "BULT Quality Assurance",
+        "=" * 60,
+        f"Plik: {filename}",
+        "",
+    ]
+
+    if not result.performed or not result.report:
+        lines.append(
+            f"Walidacja nie powiodla sie: {result.error or 'nieznany blad'}"
+        )
+        return "\n".join(lines)
+
+    r = result.report
+
+    COMPLIANCE_LABELS = {
+        "compliant": "ZGODNE — brak problemow",
+        "issues_found": "PROBLEMY — wykryto niezgodnosci",
+        "critical_issues": "KRYTYCZNE — wymagana natychmiastowa korekta",
+    }
+    lines.extend([
+        f"Status: {COMPLIANCE_LABELS.get(r.overall_compliance, r.overall_compliance)}",
+        f"Wynik: {r.score}/100",
+        f"Podsumowanie: {r.summary}",
+        "",
+    ])
+
+    SEV_MAP = {
+        "critical": "KRYTYCZNY",
+        "warning": "OSTRZEZENIE",
+        "info": "INFO",
+    }
+
+    # -- Product context -------------------------------------------------------
+    lines.append("KONTEKST PRODUKTU:")
+    lines.append("-" * 40)
+    if r.product_name:
+        lines.append(f"  Nazwa produktu: {r.product_name}")
+    if r.brand_name:
+        lines.append(f"  Marka: {r.brand_name}")
+    if r.product_classification:
+        lines.append(f"  Klasyfikacja: {r.product_classification}")
+    if r.food_type:
+        lines.append(f"  Typ karmy: {r.food_type}")
+    if r.species:
+        lines.append(f"  Gatunek: {r.species}")
+    if r.lifestage:
+        lines.append(f"  Etap zycia: {r.lifestage}")
+    lines.append("")
+
+    if r.ingredients_with_percentages:
+        lines.append("SKLADNIKI Z PROCENTAMI:")
+        for ing in r.ingredients_with_percentages:
+            lines.append(f"  - {ing}")
+        lines.append("")
+
+    if r.additives_list:
+        lines.append("DODATKI:")
+        for add in r.additives_list:
+            lines.append(f"  - {add}")
+        lines.append("")
+
+    # -- Section 1: Recipes ----------------------------------------------------
+    lines.append(f"--- SEKCJA 1: RECEPTURY ({r.recipe_section_score}/100) ---")
+    if r.recipe_claims_found:
+        lines.append(f"Znalezione claimy recepturowe ({len(r.recipe_claims_found)}):")
+        for claim in r.recipe_claims_found:
+            lines.append(f"  - {claim}")
+        lines.append("")
+
+    if r.recipe_claim_checks:
+        lines.append(f"WERYFIKACJA ({len(r.recipe_claim_checks)}):")
+        lines.append("-" * 40)
+        for rc in r.recipe_claim_checks:
+            sev = SEV_MAP.get(rc.severity, rc.severity.upper())
+            status = "OK" if rc.compliant else "NIEZGODNY"
+            lines.append(f"  [{status}][{sev}] {rc.claim_text} ({rc.claim_type})")
+            if rc.regulation_reference:
+                lines.append(f"    Podstawa: {rc.regulation_reference}")
+            if rc.finding:
+                lines.append(f"    Ustalenie: {rc.finding}")
+            if not rc.compliant and rc.issue_description:
+                lines.append(f"    Problem: {rc.issue_description}")
+            if rc.recommendation:
+                lines.append(f"    -> {rc.recommendation}")
+        lines.append("")
+    elif not r.recipe_claims_found:
+        lines.append("  Brak claimow recepturowych na etykiecie.")
+        lines.append("")
+
+    # -- Section 2: Names ------------------------------------------------------
+    lines.append(f"--- SEKCJA 2: NAZWY ({r.naming_section_score}/100) ---")
+    if r.naming_convention_checks:
+        lines.append(
+            f"REGULY PROCENTOWE ({len(r.naming_convention_checks)}):"
+        )
+        lines.append("-" * 40)
+        for nc in r.naming_convention_checks:
+            status = "OK" if nc.compliant else "NIEZGODNY"
+            lines.append(
+                f"  [{status}] {nc.product_name} — "
+                f"\"{nc.trigger_expression}\" -> {nc.applicable_rule}"
+            )
+            lines.append(
+                f"    Wymagane: min {nc.required_minimum_percent}% "
+                f"{nc.highlighted_ingredient}"
+            )
+            if nc.actual_percent is not None:
+                lines.append(f"    Znalezione: {nc.actual_percent}%")
+            if nc.notes:
+                lines.append(f"    Uwagi: {nc.notes}")
+        lines.append("")
+
+    if r.name_consistency_checks:
+        lines.append(
+            f"SPOJNOSC NAZWY ({len(r.name_consistency_checks)}):"
+        )
+        lines.append("-" * 40)
+        for ncc in r.name_consistency_checks:
+            sev = SEV_MAP.get(ncc.severity, ncc.severity.upper())
+            status = "OK" if ncc.compliant else "NIEZGODNY"
+            lines.append(
+                f"  [{status}][{sev}] {ncc.check_type}: {ncc.description}"
+            )
+            if ncc.finding:
+                lines.append(f"    Ustalenie: {ncc.finding}")
+            if not ncc.compliant and ncc.issue_description:
+                lines.append(f"    Problem: {ncc.issue_description}")
+            if ncc.recommendation:
+                lines.append(f"    -> {ncc.recommendation}")
+        lines.append("")
+
+    # -- Section 3: Brand -----------------------------------------------------
+    lines.append(f"--- SEKCJA 3: MARKA ({r.brand_section_score}/100) ---")
+    if r.brand_compliance_checks:
+        lines.append(
+            f"ZGODNOSC MARKI ({len(r.brand_compliance_checks)}):"
+        )
+        lines.append("-" * 40)
+        for bc in r.brand_compliance_checks:
+            sev = SEV_MAP.get(bc.severity, bc.severity.upper())
+            status = "OK" if bc.compliant else "NIEZGODNY"
+            lines.append(
+                f"  [{status}][{sev}] \"{bc.flagged_element}\" ({bc.check_type})"
+            )
+            if bc.regulation_reference:
+                lines.append(f"    Podstawa: {bc.regulation_reference}")
+            if not bc.compliant and bc.issue_description:
+                lines.append(f"    Problem: {bc.issue_description}")
+            if bc.recommendation:
+                lines.append(f"    -> {bc.recommendation}")
+        lines.append("")
+    else:
+        lines.append("  Brak elementow do weryfikacji w marce.")
+        lines.append("")
+
+    # -- Section 4: Trademarks ------------------------------------------------
+    lines.append(
+        f"--- SEKCJA 4: ZASTRZEZENIA ({r.trademark_section_score}/100) ---"
+    )
+    if r.trademark_checks:
+        RISK_MAP = {
+            "high": "WYSOKIE",
+            "medium": "SREDNIE",
+            "low": "NISKIE",
+            "none": "BRAK",
+        }
+        lines.append(f"ANALIZA IP/TRADEMARK ({len(r.trademark_checks)}):")
+        lines.append("-" * 40)
+        for tc in r.trademark_checks:
+            risk = RISK_MAP.get(tc.risk_level, tc.risk_level.upper())
+            lines.append(
+                f"  [Ryzyko: {risk}] \"{tc.element_text}\" ({tc.element_type})"
+            )
+            if tc.potential_owner:
+                lines.append(f"    Potencjalny wlasciciel: {tc.potential_owner}")
+            if tc.trademark_symbol_found and tc.trademark_symbol_found != "none":
+                sym = "(R)" if tc.trademark_symbol_found == "registered" else "TM"
+                lines.append(f"    Symbol na etykiecie: {sym}")
+            if tc.issue_description:
+                lines.append(f"    Opis: {tc.issue_description}")
+            if tc.recommendation:
+                lines.append(f"    -> {tc.recommendation}")
+        lines.append("")
+    else:
+        lines.append("  Brak potencjalnych naruszen znakow towarowych.")
         lines.append("")
 
     lines.extend([
@@ -1142,6 +1361,246 @@ def diff_to_text(
     lines.extend([
         "=" * 60,
         "Raport wygenerowany automatycznie. BULT Quality Assurance.",
+        "=" * 60,
+    ])
+
+    return "\n".join(lines)
+
+
+def artwork_inspection_to_text(
+    result: ArtworkInspectionResult, filename_a: str, filename_b: str = "",
+) -> str:
+    """Format artwork inspection report as human-readable text."""
+    lines = [
+        "=" * 60,
+        "INSPEKCJA ARTWORK — RAPORT QA",
+        "BULT Quality Assurance",
+        "=" * 60,
+        f"Plik A (master): {filename_a}",
+    ]
+    if filename_b:
+        lines.append(f"Plik B (proof):  {filename_b}")
+    lines.append("")
+
+    if not result.performed or not result.report:
+        lines.append(
+            f"Inspekcja nie powiodla sie: {result.error or 'nieznany blad'}"
+        )
+        return "\n".join(lines)
+
+    r = result.report
+    VERDICT_MAP = {
+        "pass": "POZYTYWNA",
+        "review": "WYMAGA PRZEGLADU",
+        "fail": "NEGATYWNA",
+    }
+    lines.extend([
+        f"Ocena ogolna: {r.overall_score}/100",
+        f"Werdykt: {VERDICT_MAP.get(r.overall_verdict, r.overall_verdict.upper())}",
+        "",
+    ])
+
+    # -- Print readiness --
+    if r.print_readiness:
+        pr = r.print_readiness
+        lines.extend([
+            "-" * 40,
+            "GOTOWOSC DO DRUKU",
+            "-" * 40,
+            f"  Format: {pr.file_format}",
+            f"  DPI: {pr.dpi:.0f} ({'OK' if pr.dpi_sufficient else 'ZA NISKIE'})",
+            f"  Przestrzen barw: {pr.color_space} "
+            f"({'OK' if pr.color_space_print_ready else 'WYMAGA KONWERSJI'})",
+            f"  Przezroczystosc: {'TAK' if pr.has_transparency else 'brak'}",
+        ])
+        if pr.fonts_embedded is not None:
+            lines.append(
+                f"  Fonty osadzone: {'TAK' if pr.fonts_embedded else 'NIE — krytyczne!'}"
+            )
+        if pr.has_bleed:
+            lines.append("  Spad (bleed): wykryty")
+        else:
+            lines.append("  Spad (bleed): nie wykryty — dodaj min 3mm")
+        if pr.page_size_mm:
+            lines.append(
+                f"  Rozmiar: {pr.page_size_mm[0]:.1f} x {pr.page_size_mm[1]:.1f} mm"
+            )
+        lines.append(
+            f"  Score: {pr.score}/100 — {'GOTOWY' if pr.print_ready else 'NIE GOTOWY'}"
+        )
+        if pr.issues:
+            lines.append("")
+            SEV_PR = {"critical": "KRYTYCZNY", "warning": "OSTRZEZENIE", "info": "INFO"}
+            for iss in pr.issues:
+                sev = SEV_PR.get(iss.severity, iss.severity.upper())
+                lines.append(f"  [{sev}] {iss.description}")
+                if iss.recommendation:
+                    lines.append(f"    -> {iss.recommendation}")
+        lines.append("")
+
+    # -- Color analysis --
+    if r.color_analysis:
+        ca = r.color_analysis
+        lines.extend([
+            "-" * 40,
+            "ANALIZA KOLOROW",
+            "-" * 40,
+            f"  Przestrzen: {ca.color_space_detected}"
+            f"{' (CMYK)' if ca.is_cmyk else ''}",
+            "  Dominujace kolory:",
+        ])
+        for c in ca.dominant_colors:
+            lines.append(f"    {c.hex} ({c.name}) — {c.percentage:.1f}%")
+
+        if ca.comparisons:
+            lines.extend([
+                "",
+                f"  Porownanie z wersja B (max Delta E: {ca.max_delta_e}):",
+                f"  Spojnosc kolorow: {ca.color_consistency_score:.1f}/100",
+            ])
+            for comp in ca.comparisons:
+                de_label = (
+                    "niezauwazalne" if comp.delta_e < 2
+                    else "drobna roznica" if comp.delta_e < 5
+                    else "WIDOCZNA ZMIANA"
+                )
+                lines.append(
+                    f"    {comp.color_a_hex} vs {comp.color_b_hex}: "
+                    f"dE={comp.delta_e:.2f} ({de_label})"
+                )
+        lines.append("")
+
+    # -- Pixel diff --
+    if r.pixel_diff:
+        pd = r.pixel_diff
+        VERD_PX = {
+            "identical": "IDENTYCZNE",
+            "minor_changes": "DROBNE ZMIANY",
+            "significant_changes": "ISTOTNE ZMIANY",
+            "major_changes": "DUZE ZMIANY",
+        }
+        lines.extend([
+            "-" * 40,
+            "POROWNANIE PIKSELI",
+            "-" * 40,
+            f"  SSIM: {pd.ssim_score:.4f} (1.0 = identyczne)",
+            f"  Zmienione piksele: {pd.changed_pixels_pct:.2f}% "
+            f"({pd.changed_pixels:,} z {pd.total_pixels:,})",
+            f"  Werdykt: {VERD_PX.get(pd.verdict, pd.verdict.upper())}",
+        ])
+        if pd.diff_regions:
+            lines.append(f"  Regiony zmian ({len(pd.diff_regions)}):")
+            for reg in pd.diff_regions:
+                lines.append(
+                    f"    [{reg.x},{reg.y} {reg.w}x{reg.h}] "
+                    f"zmiana: {reg.change_pct:.1f}%"
+                )
+        lines.append("")
+
+    # -- OCR text comparison --
+    if r.ocr_comparison:
+        ocr = r.ocr_comparison
+        lines.extend([
+            "-" * 40,
+            "POROWNANIE TEKSTU (OCR)",
+            "-" * 40,
+            f"  Podobienstwo: {ocr.similarity_pct:.1f}%",
+            f"  Zmiany: {ocr.total_changes}",
+            f"  Pewnosc OCR: A={ocr.avg_confidence_a:.0%} B={ocr.avg_confidence_b:.0%}",
+        ])
+        if ocr.changes:
+            lines.append("")
+            CHG = {"added": "DODANO", "removed": "USUNIETO", "modified": "ZMIENIONO"}
+            for ch in ocr.changes:
+                chg_label = CHG.get(ch.change_type, ch.change_type.upper())
+                lines.append(f"  [{chg_label}] linia {ch.line_number}")
+                if ch.old_text:
+                    lines.append(f'    Bylo: "{ch.old_text}"')
+                if ch.new_text:
+                    lines.append(f'    Jest: "{ch.new_text}"')
+        lines.append("")
+
+    # -- ICC profile --
+    if r.icc_profile:
+        icc = r.icc_profile
+        lines.extend([
+            "-" * 40,
+            "PROFIL ICC",
+            "-" * 40,
+            f"  Profil: {'znaleziony' if icc.has_profile else 'BRAK'}",
+        ])
+        if icc.has_profile:
+            lines.append(f"  Nazwa: {icc.profile_name}")
+            lines.append(f"  Przestrzen: {icc.color_space}")
+            lines.append(f"  Rendering intent: {icc.rendering_intent}")
+        if icc.issues:
+            for iss in icc.issues:
+                lines.append(f"  ! {iss}")
+        lines.append("")
+
+    # -- Saliency --
+    if r.saliency:
+        sal = r.saliency
+        lines.extend([
+            "-" * 40,
+            "ANALIZA UWAGI WIZUALNEJ",
+            "-" * 40,
+            f"  Model: {sal.model_used}",
+            f"  Focus score: {sal.focus_score:.0f}/100",
+        ])
+        if sal.focus_metrics:
+            fm = sal.focus_metrics
+            lines.extend([
+                f"    Entropia: {fm.entropy:.0f}/100",
+                f"    Gini: {fm.gini:.3f}",
+                f"    Klastry uwagi: {fm.cluster_count}",
+            ])
+        if sal.clarity:
+            cl = sal.clarity
+            lines.extend([
+                f"  Czytelnosc: {cl.score:.0f}/100",
+                f"    Gestosc krawedzi: {cl.edge_density:.4f}",
+                f"    Kolory dominujace: {cl.color_complexity}",
+                f"    Biala przestrzen: {cl.whitespace_ratio:.1%}",
+                f"    Symetria: {cl.symmetry:.3f}",
+            ])
+        if sal.cognitive_load:
+            cg = sal.cognitive_load
+            lines.extend([
+                f"  Obciazenie kognitywne: {cg.score:.0f}/100 "
+                f"(latwosc przetwarzania: {cg.ease_score:.0f}/100)",
+                f"    Zlozonosc czestotl.: {cg.frequency_complexity:.4f}",
+                f"    Elementy wizualne: {cg.element_count}",
+                f"    Roznorodnosc kolorow: {cg.color_diversity:.3f}",
+                f"    Gestosc krawedzi: {cg.edge_density:.4f}",
+            ])
+        if sal.attention_regions:
+            lines.append(f"  Regiony uwagi ({len(sal.attention_regions)}):")
+            for reg in sal.attention_regions:
+                lines.append(
+                    f"    #{reg.rank}: {reg.attention_pct:.1f}% uwagi "
+                    f"[{reg.x},{reg.y} {reg.w}x{reg.h}]"
+                )
+        lines.append("")
+
+    # -- AI summary --
+    if r.ai_summary:
+        lines.extend([
+            "-" * 40,
+            "PODSUMOWANIE AI",
+            "-" * 40,
+            f"  {r.ai_summary}",
+            "",
+        ])
+    if r.ai_recommendations:
+        lines.append("REKOMENDACJE:")
+        for i, rec in enumerate(r.ai_recommendations, 1):
+            lines.append(f"  {i}. {rec}")
+        lines.append("")
+
+    lines.extend([
+        "=" * 60,
+        "Raport wygenerowany automatycznie — inspekcja artwork. BULT QA.",
         "=" * 60,
     ])
 

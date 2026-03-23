@@ -49,6 +49,26 @@ class CompetitiveBenchmark(NullSafeBase):
     suggestion: str = Field(default="", description="What to improve")
 
 
+class BenchmarkComparison(NullSafeBase):
+    """Quantitative benchmark comparison for a single design category."""
+
+    category: str = Field(default="", description="Category key")
+    category_name: str = Field(default="", description="Display name")
+    score: int = Field(default=0, description="Label's score for this category")
+    segment: str = Field(default="", description="Product segment used for comparison")
+    benchmark_low: int = Field(default=0, description="25th percentile in segment")
+    benchmark_median: int = Field(default=0, description="Median in segment")
+    benchmark_high: int = Field(default=0, description="75th percentile in segment")
+    percentile: int = Field(
+        default=0,
+        description="Estimated percentile rank of this label within the segment (0–100)",
+    )
+    verdict: str = Field(
+        default="",
+        description="'below_average', 'average', 'above_average', 'excellent'",
+    )
+
+
 class DesignAnalysisReport(NullSafeBase):
     """AI output for graphic design analysis."""
 
@@ -63,6 +83,10 @@ class DesignAnalysisReport(NullSafeBase):
     )
     competitive_benchmarks: list[CompetitiveBenchmark] = Field(
         default_factory=list,
+    )
+    benchmark_comparisons: list[BenchmarkComparison] = Field(
+        default_factory=list,
+        description="Quantitative benchmark comparisons per category against segment data",
     )
     trend_alignment: list[str] = Field(
         default_factory=list,

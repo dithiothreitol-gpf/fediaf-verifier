@@ -64,6 +64,9 @@ class AppSettings(BaseSettings):
     # Claims vs Composition check
     max_tokens_claims: int = 12288
 
+    # Commercial presentation check (recipes, names, brand, trademarks)
+    max_tokens_presentation: int = 16384
+
     # Label text generation
     max_tokens_label_text: int = 12288
 
@@ -82,8 +85,8 @@ class AppSettings(BaseSettings):
     # Label structure check
     max_tokens_structure: int = 12288
 
-    # Per-market compliance check
-    max_tokens_market: int = 12288
+    # Artwork inspection (AI summary of deterministic findings)
+    max_tokens_artwork: int = 8192
 
     # Self-verification (reflection step) — doubles API calls but reduces false positives
     self_verify_enabled: bool = True

@@ -1,0 +1,8 @@
+- Quality Assurance:
+    - FEDIAF Verifier:
+        href: https://fediaf.ggpf.pl
+        description: Weryfikacja etykiet karmy wg FEDIAF + EU 767/2009
+        icon: mdi-check-decagram
+        # Odkomentuj po podlaczeniu Docker socket:
+        # server: my-docker
+        # container: fediaf-verifier-app-1

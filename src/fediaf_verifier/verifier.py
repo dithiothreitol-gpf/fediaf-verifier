@@ -34,9 +34,11 @@ from fediaf_verifier.prompts import (
     LABEL_DIFF_PROMPT,
     LABEL_STRUCTURE_PROMPT,
     LINGUISTIC_ONLY_PROMPT,
+    PRESENTATION_CHECK_PROMPT,
     SECONDARY_CHECK_PROMPT,
     SELF_VERIFY_PROMPT,
     PRODUCT_DESCRIPTION_VERIFY_PROMPT,
+    build_artwork_summary_prompt,
     build_label_text_prompt,
     build_market_check_prompt,
     build_product_description_from_image_prompt,
@@ -387,6 +389,64 @@ def verify_claims(
         return ClaimsCheckResult(
             performed=False,
             error=f"Blad walidacji claimow: {e}",
+        )
+
+
+def verify_presentation(
+    label_b64: str,
+    media_type: str,
+    provider: AIProvider,
+    settings: AppSettings,
+) -> "PresentationCheckResult":
+    """Check commercial presentation compliance (recipes, names, brand, trademarks).
+
+    Single AI call: extracts product context, validates recipe claims,
+    naming conventions (EU 767/2009 Art.17), brand regulatory compliance,
+    and trademark / IP risks.
+    """
+    from fediaf_verifier.models.presentation_check import (
+        PresentationCheckReport,
+        PresentationCheckResult,
+    )
+
+    logger.info("Presentation compliance check...")
+
+    def _call() -> PresentationCheckResult:
+        raw_text = provider.call(
+            prompt=PRESENTATION_CHECK_PROMPT,
+            media_b64=label_b64,
+            media_type=media_type,
+            max_tokens=settings.max_tokens_presentation,
+        )
+
+        json_text = extract_json(raw_text)
+        data = json.loads(json_text)
+
+        report = PresentationCheckReport.model_validate(data)
+
+        # Self-verify: send result back to AI for false-positive removal
+        corrected = _self_verify(
+            result_json=json_text,
+            label_b64=label_b64,
+            media_type=media_type,
+            provider=provider,
+            settings=settings,
+            model_class=PresentationCheckReport,
+            mode="presentation",
+            prompt_used=PRESENTATION_CHECK_PROMPT,
+        )
+        if corrected is not None:
+            report = corrected
+
+        return PresentationCheckResult(performed=True, report=report)
+
+    try:
+        return api_call_with_retry(_call)
+    except Exception as e:
+        logger.error("Presentation check failed: {}", e)
+        return PresentationCheckResult(
+            performed=False,
+            error=f"Blad walidacji prezentacji handlowej: {e}",
         )
 
 
@@ -979,6 +1039,7 @@ def verify_design_analysis(
     media_type: str,
     provider: AIProvider,
     settings: AppSettings,
+    segment: str = "premium_dry",
 ) -> "DesignAnalysisResult":
     """Analyze label graphic design against packaging best practices."""
     from fediaf_verifier.models.design_analysis import (
@@ -1000,6 +1061,18 @@ def verify_design_analysis(
         data = json.loads(json_text)
 
         report = DesignAnalysisReport.model_validate(data)
+
+        # --- Benchmarks ---
+        try:
+            from fediaf_verifier.benchmarks import get_benchmarks, record_scores
+
+            report.benchmark_comparisons = get_benchmarks(
+                segment, report.category_scores,
+            )
+            record_scores(segment, report.category_scores)
+        except Exception as exc:
+            logger.warning("Benchmark computation failed: {}", exc)
+
         return DesignAnalysisResult(performed=True, report=report)
 
     try:
@@ -1009,6 +1082,91 @@ def verify_design_analysis(
         return DesignAnalysisResult(
             performed=False,
             error=f"Blad analizy graficznej: {e}",
+        )
+
+
+def verify_artwork_inspection(
+    img_a_b64: str,
+    media_type_a: str,
+    provider: AIProvider,
+    settings: AppSettings,
+    img_b_b64: str | None = None,
+    media_type_b: str | None = None,
+    pixel_diff_threshold: int = 30,
+    n_colors: int = 6,
+    enable_ocr: bool = True,
+    enable_saliency: bool = True,
+) -> "ArtworkInspectionResult":
+    """Run artwork inspection: pixel diff, color, print, OCR, ICC, saliency.
+
+    Deterministic CV analysis + optional AI summary of findings.
+
+    Args:
+        img_a_b64: Base64-encoded master/reference image.
+        media_type_a: MIME type of image A.
+        provider: AI provider for summary generation.
+        settings: App settings.
+        img_b_b64: Optional base64-encoded proof/new version.
+        media_type_b: MIME type of image B.
+        pixel_diff_threshold: Sensitivity for pixel change detection (0–255).
+        n_colors: Number of dominant colors to extract.
+        enable_ocr: Enable OCR text comparison (requires easyocr).
+        enable_saliency: Enable saliency heatmap analysis.
+    """
+    from fediaf_verifier.artwork_inspector import run_artwork_inspection
+    from fediaf_verifier.models.artwork_inspection import (
+        ArtworkInspectionResult,
+    )
+
+    logger.info("Artwork inspection...")
+
+    try:
+        # Phase 1: Deterministic analysis (OpenCV / Pillow)
+        report = run_artwork_inspection(
+            img_a_b64=img_a_b64,
+            media_type_a=media_type_a,
+            img_b_b64=img_b_b64,
+            media_type_b=media_type_b,
+            pixel_diff_threshold=pixel_diff_threshold,
+            n_colors=n_colors,
+            enable_ocr=enable_ocr,
+            enable_saliency=enable_saliency,
+        )
+
+        # Phase 2: AI summary of findings
+        try:
+            findings_data = report.model_dump(
+                exclude={
+                    "pixel_diff": {"diff_image_b64"},
+                    "saliency": {"heatmap_b64"},
+                },
+                exclude_none=True,
+            )
+            findings_json = json.dumps(findings_data, ensure_ascii=False, indent=2)
+            prompt = build_artwork_summary_prompt(findings_json)
+
+            raw_text = provider.call(
+                prompt=prompt,
+                max_tokens=settings.max_tokens_artwork,
+            )
+            json_text = extract_json(raw_text)
+            ai_data = json.loads(json_text)
+
+            report.ai_summary = ai_data.get("ai_summary", "")
+            report.ai_recommendations = ai_data.get("ai_recommendations", [])
+        except Exception as e:
+            logger.warning("AI summary for artwork inspection failed: {}", e)
+            report.ai_summary = "Podsumowanie AI niedostepne — wyniki deterministyczne powyzej."
+
+        return ArtworkInspectionResult(performed=True, report=report)
+
+    except Exception as e:
+        logger.error("Artwork inspection failed: {}", e)
+        from fediaf_verifier.models.artwork_inspection import ArtworkInspectionResult
+
+        return ArtworkInspectionResult(
+            performed=False,
+            error=f"Blad inspekcji artwork: {e}",
         )
 
 
@@ -1068,6 +1226,70 @@ def verify_label_structure(
         )
 
 
+def _cross_validate_linguistic(report) -> "LinguisticReport":
+    """Cross-validate AI linguistic issues against Hunspell (deterministic).
+
+    Adds confidence scoring to each issue:
+    - HIGH: AI + Hunspell agree the word is misspelled
+    - MEDIUM: Only AI flagged it (grammar/punctuation — can't verify)
+    - LOW: AI flagged but Hunspell says word is correct (possible hallucination)
+
+    Also checks for missing diacritics that AI might have missed.
+    """
+    from fediaf_verifier.models import LinguisticReport
+
+    if not report or not report.issues:
+        return report
+
+    lang = report.detected_language or ""
+    if not lang:
+        return report
+
+    try:
+        from fediaf_verifier.spellcheck import (
+            check_diacritics_presence,
+            validate_ai_linguistic_issues,
+        )
+
+        # Cross-validate existing AI issues
+        issues_dicts = [iss.model_dump() for iss in report.issues]
+        validated = validate_ai_linguistic_issues(
+            ai_issues=issues_dicts,
+            text="",  # not needed for word-level validation
+            language=lang,
+        )
+
+        # Rebuild issues with confidence data
+        from fediaf_verifier.models import LinguisticIssue
+
+        new_issues = []
+        for iss_dict in validated:
+            new_issues.append(LinguisticIssue.model_validate(iss_dict))
+
+        report = LinguisticReport(
+            detected_language=report.detected_language,
+            detected_language_name=report.detected_language_name,
+            issues=new_issues,
+            overall_quality=report.overall_quality,
+            summary=report.summary,
+        )
+
+        logger.info(
+            "Cross-validation: {} issues scored (high={}, medium={}, low={})",
+            len(new_issues),
+            sum(1 for i in new_issues if i.confidence == "high"),
+            sum(1 for i in new_issues if i.confidence == "medium"),
+            sum(1 for i in new_issues if i.confidence == "low"),
+        )
+
+    except ImportError:
+        logger.debug("spylls not installed — skipping deterministic cross-validation")
+    except Exception as e:
+        logger.warning("Cross-validation failed (non-blocking): {}", e)
+
+    return report
+
+
 def verify_linguistic_only(
     label_b64: str,
     media_type: str,
@@ -1108,6 +1330,9 @@ def verify_linguistic_only(
         )
         if corrected is not None:
             report = corrected
+
+        # Deterministic cross-validation: Hunspell confirms/denies AI findings
+        report = _cross_validate_linguistic(report)
 
         return LinguisticCheckResult(performed=True, report=report)
 
@@ -1302,15 +1527,20 @@ def _build_enriched_report(
     if secondary and secondary.linguistic_issues is not None:
         from fediaf_verifier.models import LinguisticReport
 
+        report = LinguisticReport(
+            detected_language=secondary.detected_language,
+            detected_language_name=secondary.detected_language_name,
+            issues=secondary.linguistic_issues,
+            overall_quality=secondary.overall_language_quality,
+            summary=secondary.language_summary,
+        )
+
+        # Deterministic cross-validation: Hunspell confirms/denies AI findings
+        report = _cross_validate_linguistic(report)
+
         linguistic_result = LinguisticCheckResult(
             performed=True,
-            report=LinguisticReport(
-                detected_language=secondary.detected_language,
-                detected_language_name=secondary.detected_language_name,
-                issues=secondary.linguistic_issues,
-                overall_quality=secondary.overall_language_quality,
-                summary=secondary.language_summary,
-            ),
+            report=report,
         )
 
     # Reliability flags
