@@ -1373,11 +1373,12 @@ def _reread_verify_issues(
 
         ocr_conf = ocr_check["confidence"]
 
-        # Strategy 1: High-confidence OCR pattern + valid suggestion → auto-dismiss
-        # BUT: if the original is ALSO a valid word, this might be a real
-        # error (e.g., "ZLECENIA" vs "ZALECENIA" — both valid Polish words).
+        # Strategy 1: High-confidence OCR pattern + valid suggestion
+        # Instead of removing, DOWNGRADE confidence to "low" with explanation.
+        # This way the user sees it but knows it's likely an AI hallucination.
+        # Exception: if original is ALSO a valid word → keep as-is (real error).
         if ocr_conf >= 0.7 and hunspell_dict is not None:
-            # Check if original words are valid (if so, it may be a real error)
+            # Check if original words are all valid (both sides real words = real error)
             original_words = _extract_words(iss.original)
             original_checkable = [w for w in original_words if len(w) > 2]
             original_all_valid = len(original_checkable) > 0 and all(
@@ -1386,15 +1387,15 @@ def _reread_verify_issues(
                 for w in original_checkable
             )
             if original_all_valid:
-                # Original is valid text too — this is likely a real error,
-                # not an OCR hallucination. Keep it.
+                # Both original and suggestion are valid words — real error, keep as-is
                 logger.warning(
-                    "REREAD: issue[{}] NOT auto-dismissed (original is also valid: {})",
+                    "REREAD: issue[{}] KEPT (original is also valid: {})",
                     idx, original_checkable,
                 )
                 continue
 
-            # Extract real words from suggestion (strips punctuation)
+            # Original has invalid words + matches OCR pattern → likely hallucination
+            # Downgrade to "low" confidence instead of removing
             suggestion_words = _extract_words(iss.suggestion)
             checkable = [w for w in suggestion_words if len(w) > 2]
             suggestion_valid = len(checkable) > 0 and all(
@@ -1402,18 +1403,9 @@ def _reread_verify_issues(
                 or hunspell_dict.lookup(w.title())
                 for w in checkable
             )
-            logger.warning(
-                "REREAD: issue[{}] auto-dismiss check: checkable={}, valid={}",
-                idx, checkable, suggestion_valid,
-            )
             if suggestion_valid:
                 auto_dismiss_indices.append(idx)
-                logger.warning("REREAD: issue[{}] AUTO-DISMISSED", idx)
-                logger.info(
-                    "OCR auto-dismiss: '{}' → '{}' (pattern: {}, conf: {:.1f})",
-                    iss.original, iss.suggestion,
-                    ocr_check["confusion_type"], ocr_conf,
-                )
+                logger.warning("REREAD: issue[{}] DOWNGRADED to low (likely hallucination)", idx)
                 continue
 
         # Strategy 2: Medium-confidence → queue for AI re-read
@@ -1426,10 +1418,11 @@ def _reread_verify_issues(
         })
         reread_indices.append(idx)
 
-    # Apply auto-dismissals
+    # Apply downgrades (not removals — user still sees them with "low" confidence)
     issues_updated = list(report.issues)
     for idx in auto_dismiss_indices:
-        issues_updated[idx].ocr_false_positive = True
+        issues_updated[idx].confidence = "low"
+        issues_updated[idx].verified_by = "ai_only (possible hallucination — OCR pattern match)"
         issues_updated[idx].ocr_reread_word = issues_updated[idx].suggestion
 
     # AI re-read for remaining candidates (only if there are any)
@@ -1485,7 +1478,9 @@ def _reread_verify_issues(
                 rr_confidence = rr.get("confidence", "low")
 
                 if is_correct and rr_confidence in ("high", "medium"):
-                    iss.ocr_false_positive = True
+                    # Re-read confirms label is correct → downgrade to low
+                    iss.confidence = "low"
+                    iss.verified_by = "ai_only (re-read confirms image is correct)"
                     iss.ocr_reread_word = rr.get("reread_from_image", "")
                     logger.info(
                         "Reread: '{}' confirmed correct on image ('{}')",
@@ -1495,20 +1490,19 @@ def _reread_verify_issues(
         except Exception as e:
             logger.warning("Reread AI call failed (non-blocking): {}", e)
 
-    # Filter out all confirmed OCR false positives
-    filtered_issues = [iss for iss in issues_updated if not iss.ocr_false_positive]
-    total_removed = sum(1 for iss in issues_updated if iss.ocr_false_positive)
-
+    downgraded = len(auto_dismiss_indices) + sum(
+        1 for idx in reread_indices if issues_updated[idx].confidence == "low"
+    )
     logger.info(
-        "OCR filter: removed {} issues ({} auto-dismissed, {} by re-read)",
-        total_removed, len(auto_dismiss_indices),
-        total_removed - len(auto_dismiss_indices),
+        "OCR filter: downgraded {} issues to 'low' confidence ({} by pattern, {} by re-read)",
+        downgraded, len(auto_dismiss_indices),
+        downgraded - len(auto_dismiss_indices),
     )
 
     return LinguisticReport(
         detected_language=report.detected_language,
         detected_language_name=report.detected_language_name,
-        issues=filtered_issues,
+        issues=issues_updated,
         overall_quality=report.overall_quality,
         summary=report.summary,
     )
