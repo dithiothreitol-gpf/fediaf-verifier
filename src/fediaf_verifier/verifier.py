@@ -1317,24 +1317,45 @@ def _reread_verify_issues(
     if not report or not report.issues:
         return report
 
-    lang = report.detected_language or ""
+    # Extract primary language from compound codes like "pl+sk", "pl,sk", "pl/sk"
+    raw_lang = report.detected_language or ""
+    lang = raw_lang.split("+")[0].split(",")[0].split("/")[0].strip().lower()
+    logger.warning("REREAD: processing {} issues, raw_lang={}, lang={}", len(report.issues), raw_lang, lang)
 
     # Try to load Hunspell for deterministic validation of suggestions
     hunspell_dict = None
     try:
         hunspell_dict = _load_dictionary(lang)
-    except Exception:
-        pass
+        logger.warning("REREAD: Hunspell dict loaded: {}", hunspell_dict is not None)
+    except Exception as exc:
+        logger.warning("REREAD: Hunspell load failed: {}", exc)
 
     # Classify issues into: auto-dismiss (high OCR confidence) vs re-read (medium)
     auto_dismiss_indices: list[int] = []
     reread_candidates: list[dict] = []
     reread_indices: list[int] = []
 
+    # Issue type keywords that indicate spelling/diacritics (AI may return
+    # free-form Polish descriptions instead of standardized English codes)
+    _SPELLING_KEYWORDS = {
+        "spelling", "diacritics", "ortografia", "diakrytycz", "literow",
+        "niekompletne", "brakuj",
+    }
+
+    def _is_spelling_or_diacritics(issue_type: str) -> bool:
+        it_lower = issue_type.lower()
+        return any(kw in it_lower for kw in _SPELLING_KEYWORDS)
+
     for idx, iss in enumerate(report.issues):
-        if iss.issue_type not in ("spelling", "diacritics"):
+        logger.warning(
+            "REREAD: issue[{}] type={}, original={!r}, suggestion={!r}",
+            idx, iss.issue_type, iss.original[:50], iss.suggestion[:50],
+        )
+        if not _is_spelling_or_diacritics(iss.issue_type):
+            logger.warning("REREAD: issue[{}] skipped (type={})", idx, iss.issue_type)
             continue
         if not iss.original or not iss.suggestion:
+            logger.warning("REREAD: issue[{}] skipped (empty orig/sugg)", idx)
             continue
 
         ocr_check = detect_ocr_confusion(
@@ -1342,24 +1363,52 @@ def _reread_verify_issues(
             suggestion=iss.suggestion,
             language=lang,
         )
+        logger.warning(
+            "REREAD: issue[{}] OCR check: likely={}, conf={}, type={}",
+            idx, ocr_check["is_ocr_likely"], ocr_check["confidence"],
+            ocr_check["confusion_type"],
+        )
         if not ocr_check["is_ocr_likely"]:
             continue
 
         ocr_conf = ocr_check["confidence"]
 
         # Strategy 1: High-confidence OCR pattern + valid suggestion → auto-dismiss
+        # BUT: if the original is ALSO a valid word, this might be a real
+        # error (e.g., "ZLECENIA" vs "ZALECENIA" — both valid Polish words).
         if ocr_conf >= 0.7 and hunspell_dict is not None:
+            # Check if original words are valid (if so, it may be a real error)
+            original_words = _extract_words(iss.original)
+            original_checkable = [w for w in original_words if len(w) > 2]
+            original_all_valid = len(original_checkable) > 0 and all(
+                hunspell_dict.lookup(w) or hunspell_dict.lookup(w.lower())
+                or hunspell_dict.lookup(w.title())
+                for w in original_checkable
+            )
+            if original_all_valid:
+                # Original is valid text too — this is likely a real error,
+                # not an OCR hallucination. Keep it.
+                logger.warning(
+                    "REREAD: issue[{}] NOT auto-dismissed (original is also valid: {})",
+                    idx, original_checkable,
+                )
+                continue
+
             # Extract real words from suggestion (strips punctuation)
             suggestion_words = _extract_words(iss.suggestion)
-            # Must have at least one checkable word to validate
             checkable = [w for w in suggestion_words if len(w) > 2]
             suggestion_valid = len(checkable) > 0 and all(
                 hunspell_dict.lookup(w) or hunspell_dict.lookup(w.lower())
                 or hunspell_dict.lookup(w.title())
                 for w in checkable
             )
+            logger.warning(
+                "REREAD: issue[{}] auto-dismiss check: checkable={}, valid={}",
+                idx, checkable, suggestion_valid,
+            )
             if suggestion_valid:
                 auto_dismiss_indices.append(idx)
+                logger.warning("REREAD: issue[{}] AUTO-DISMISSED", idx)
                 logger.info(
                     "OCR auto-dismiss: '{}' → '{}' (pattern: {}, conf: {:.1f})",
                     iss.original, iss.suggestion,
@@ -1509,11 +1558,23 @@ def verify_linguistic_only(
         # Deterministic cross-validation: Hunspell confirms/denies AI findings
         report = _cross_validate_linguistic(report)
 
+        logger.warning(
+            "PRE-REREAD: {} issues, reread_enabled={}, types={}",
+            len(report.issues) if report and report.issues else 0,
+            settings.reread_enabled,
+            [(i.issue_type, i.original[:30], i.suggestion[:30]) for i in (report.issues or [])],
+        )
+
         # Targeted re-read: verify OCR-suspect issues against the image
         if settings.reread_enabled:
             report = _reread_verify_issues(
                 report, label_b64, media_type, provider, settings
             )
+
+        logger.warning(
+            "POST-REREAD: {} issues remaining",
+            len(report.issues) if report and report.issues else 0,
+        )
 
         return LinguisticCheckResult(performed=True, report=report)
 

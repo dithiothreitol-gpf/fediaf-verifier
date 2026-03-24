@@ -55,15 +55,24 @@ Sprawdz caly tekst na etykiecie pod katem:
 - Interpunkcja
 - Spojnosc terminologii (mieszanie jezykow w jednym bloku, np. "bialko" obok "protein")
 Automatycznie wykryj jezyk(i).
-WAZNE: Pole "original" = DOKLADNA kopia tekstu z etykiety (z diakrytykami \
-jesli widoczne). ZANIM zgloszisz brak diakrytyku — PRZYJRZYJ SIE uwaznie \
-czy znak RZECZYWISCIE brakuje. Jesli nie jestes pewny — nie zglaszaj. \
-Kazdy fragment zglaszaj MAX RAZ (bez duplikatow). \
-NIE zglaszaj: tekstu poprawnego, celowej kapitalizacji w claimach, \
+
+KRYTYCZNE ZASADY ANTY-HALUCYNACYJNE:
+1. Pole "original" = DOKLADNA kopia tekstu z etykiety, litera po literze. \
+Patrzysz NA OBRAZ — nie zgaduj, nie uzupelniaj z pamieci.
+2. ZANIM zgloszisz JAKIKOLWIEK blad ortograficzny, PRZELITERUJ slowo \
+z obrazu znak po znaku w polu "explanation". \
+Przyklad: "Odczyt z obrazu: W-a-r-t-o-s-c-i. Slowo jest poprawne." \
+Jesli po przeliterowaniu slowo jest poprawne — NIE zglaszaj.
+3. ZNANE PULAPKI HALUCYNACYJNE — NIE zglaszaj brakujacych liter 'rt', 'rn', \
+'fi', 'fl' jesli NIE JESTES W 100% PEWNY ze te litery faktycznie sa \
+niewidoczne na obrazie. Modele AI czesto halucynuja brak tych par liter. \
+W razie JAKIEJKOLWIEK watpliwosci — NIE zglaszaj.
+4. Kazdy fragment zglaszaj MAX RAZ (bez duplikatow).
+5. NIE zglaszaj: tekstu poprawnego, celowej kapitalizacji w claimach, \
 celowych zapisow dwujezycznych.
 
 Odpowiedz WYLACZNIE poprawnym JSON (bez markdown). Badz ZWIEZLY — krotkie opisy, max 10 najwazniejszych bledow jezykowych. Pola:
-cross_crude_protein/fat/fibre/moisture/crude_ash/calcium/phosphorus (liczby lub null),
+cross_crude_protein/fat/fibre/moisture/crude_ash/calcium/phosphorus (TYLKO sama liczba bez jednostek i bez znaku %, np. 16 zamiast "16 %", 0.8 zamiast "0,8 %" — uzyj kropki jako separatora dziesietnego; lub null),
 cross_reading_notes,
 detected_language (np. "pl"), detected_language_name (np. "polski"),
 linguistic_issues (lista: [{issue_type, original, suggestion, context, explanation}]),
@@ -94,20 +103,27 @@ Jesli na obrazie widzisz "Składniki" ze znakiem ł — wpisz "Składniki". \
 NIE zamieniaj liter na ich odpowiedniki bez diakrytykow. \
 Pole "original" musi byc WIERNYM odwzorowaniem tego co jest na etykiecie.
 
-2. WERYFIKACJA PRZED ZGLOSZENIEM — zanim zgloszisz brak diakrytyku, \
-PRZYJRZYJ SIE UWAZNIE danemu slowu na obrazie. \
-Znaki ł/l, ą/a, ę/e, ó/o moga byc trudne do rozroznienia przy malym foncie. \
-Jesli NIE JESTES PEWNY czy znak diakrytyczny jest obecny — NIE zglaszaj. \
-Lepiej pominac watpliwy przypadek niz zglaszac false positive.
+2. OBOWIAZKOWA WERYFIKACJA — ZANIM zgloszisz JAKIKOLWIEK blad, \
+PRZELITERUJ slowo z obrazu znak po znaku i wpisz to w polu "explanation". \
+Format: "Odczyt z obrazu: W-a-r-t-o-ś-c-i → słowo poprawne, nie zgłaszam." \
+Jesli po przeliterowaniu slowo okazuje sie poprawne — NIE zglaszaj. \
+To jest OBOWIAZKOWY krok — nie pomijaj go.
 
-3. BEZ DUPLIKATOW — kazdy fragment tekstu zglaszaj MAKSYMALNIE RAZ. \
-Jesli "Skladniki" wystepuje 5 razy bez diakrytykow — zglos to RAZ \
-z adnotacja ile razy wystepuje, nie 5 osobnych issues.
+3. ZNANE PULAPKI HALUCYNACYJNE — modele AI czesto HALUCYNUJA brak \
+par liter 'rt', 'rn', 'fi', 'fl' w slowach. Jesli uważasz ze brakuje \
+takich par liter — sprawdz TRZYKROTNIE na obrazie zanim zgloszisz. \
+W razie JAKIEJKOLWIEK watpliwosci — NIE zglaszaj. \
+Lepiej pominac prawdziwy blad niz zglaszac falszywy.
 
-4. TYLKO BLEDY — nie umieszczaj w liście issues elementow poprawnych. \
-Jesli tekst jest prawidlowy — nie dodawaj go.
+4. WERYFIKACJA DIAKRYTYKOW — znaki ł/l, ą/a, ę/e, ó/o moga byc \
+trudne do rozroznienia przy malym foncie. \
+Jesli NIE JESTES PEWNY czy znak diakrytyczny jest obecny — NIE zglaszaj.
 
-5. KONWENCJE BRANZY PET FOOD — nie zglaszaj:
+5. BEZ DUPLIKATOW — kazdy fragment tekstu zglaszaj MAKSYMALNIE RAZ.
+
+6. TYLKO BLEDY — nie umieszczaj w liście issues elementow poprawnych.
+
+7. KONWENCJE BRANZY PET FOOD — nie zglaszaj:
 - Celowej kapitalizacji w claimach (np. "bez Soi", "bez GMO")
 - Celowych zapisow dwujezycznych w ikonach/badge'ach
 - Formatow wielojezycznych w polach formalnych
@@ -135,9 +151,15 @@ A) FALSE POSITIVE — zgloszono problem ktorego NIE MA na obrazie:
    - Zgloszono niezgodnosc ktora nie istnieje
    - Pole "original" nie odpowiada temu co jest na obrazie
 
-B) DUPLIKATY — ten sam problem zgloszony wiecej niz raz
+B) HALUCYNACJE BRAKUJACYCH LITER — NAJCZESTSZY BLAD AI:
+   - Zgloszono brak liter 'rt', 'rn', 'fi', 'fl' w slowach \
+(np. "Waości" zamiast "Wartości", "paii" zamiast "partii")
+   - Przeliteruj slowo z OBRAZU znak po znaku
+   - Jesli litery SA na obrazie — USUN ten element
 
-C) HALUCYNACJE — zgloszono tekst ktory w ogole nie wystepuje na etykiecie
+C) DUPLIKATY — ten sam problem zgloszony wiecej niz raz
+
+D) HALUCYNACJE — zgloszono tekst ktory w ogole nie wystepuje na etykiecie
 
 Dla KAZDEGO elementu w wyniku:
 - POROWNAJ z obrazem

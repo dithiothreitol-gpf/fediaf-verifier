@@ -468,13 +468,22 @@ def validate_ai_linguistic_issues(
     Returns:
         Same list with added confidence/verified_by fields.
     """
-    dictionary = _load_dictionary(language)
+    # Extract primary language from compound codes like "pl+sk"
+    primary_lang = language.split("+")[0].split(",")[0].split("/")[0].strip().lower()
+    dictionary = _load_dictionary(primary_lang) if primary_lang else _load_dictionary(language)
+
+    # Issue type keywords — AI may return free-form Polish descriptions
+    _spell_kw = {"spelling", "diacritics", "ortografia", "diakrytycz",
+                 "literow", "niekompletne", "brakuj"}
+
+    def _is_spelling(it: str) -> bool:
+        return any(kw in it.lower() for kw in _spell_kw)
 
     for issue in ai_issues:
         issue_type = issue.get("issue_type", "")
         original = normalize_nfc(issue.get("original", ""))
 
-        if issue_type in ("spelling", "diacritics") and dictionary is not None:
+        if _is_spelling(issue_type) and dictionary is not None:
             # Extract the flagged word(s) from original
             words = _extract_words(original)
             if not words:
@@ -498,12 +507,11 @@ def validate_ai_linguistic_issues(
                 issue["confidence"] = "low"
                 issue["verified_by"] = "ai_only (hunspell disagrees)"
 
-        elif issue_type == "grammar":
-            # Grammar: can't verify deterministically without LanguageTool
+        elif any(kw in issue_type.lower() for kw in ("grammar", "gramatyk")):
             issue["confidence"] = "medium"
             issue["verified_by"] = "ai_only"
 
-        elif issue_type in ("punctuation", "terminology"):
+        elif any(kw in issue_type.lower() for kw in ("punctuation", "interpunkcj", "terminology", "terminologi", "spójnoś")):
             issue["confidence"] = "medium"
             issue["verified_by"] = "ai_only"
 

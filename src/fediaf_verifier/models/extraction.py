@@ -1,8 +1,30 @@
 """Raw extraction models — what the AI sees on the label."""
 
-from pydantic import BaseModel
+from __future__ import annotations
+
+from typing import Annotated, Any
+
+from pydantic import BaseModel, BeforeValidator
 
 from .linguistic import LinguisticIssue
+
+
+def _parse_numeric(v: Any) -> float | None:
+    """Strip %-signs, whitespace, and handle comma decimals before float parsing."""
+    if v is None:
+        return None
+    if isinstance(v, (int, float)):
+        return float(v)
+    if isinstance(v, str):
+        v = v.strip().rstrip("%").strip()
+        if not v:
+            return None
+        v = v.replace(",", ".")
+        return float(v)
+    return v
+
+
+FlexFloat = Annotated[float | None, BeforeValidator(_parse_numeric)]
 
 
 class LabelExtraction(BaseModel):
@@ -79,13 +101,13 @@ class SecondaryCheck(BaseModel):
     """Combined cross-check + linguistic verification (Call 2 output)."""
 
     # Cross-check: independent re-read of nutrients
-    cross_crude_protein: float | None = None
-    cross_crude_fat: float | None = None
-    cross_crude_fibre: float | None = None
-    cross_moisture: float | None = None
-    cross_crude_ash: float | None = None
-    cross_calcium: float | None = None
-    cross_phosphorus: float | None = None
+    cross_crude_protein: FlexFloat = None
+    cross_crude_fat: FlexFloat = None
+    cross_crude_fibre: FlexFloat = None
+    cross_moisture: FlexFloat = None
+    cross_crude_ash: FlexFloat = None
+    cross_calcium: FlexFloat = None
+    cross_phosphorus: FlexFloat = None
     cross_reading_notes: str = ""
 
     # Linguistic verification
