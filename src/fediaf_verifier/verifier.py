@@ -38,6 +38,7 @@ from fediaf_verifier.prompts import (
     SECONDARY_CHECK_PROMPT,
     SELF_VERIFY_PROMPT,
     PRODUCT_DESCRIPTION_VERIFY_PROMPT,
+    build_targeted_reread_prompt,
     build_artwork_summary_prompt,
     build_label_text_prompt,
     build_market_check_prompt,
@@ -222,7 +223,11 @@ def verify_label(
     )
 
     # -- PYTHON: Build final report --------------------------------------------
-    return _build_enriched_report(extraction, compliance, secondary, settings)
+    return _build_enriched_report(
+        extraction, compliance, secondary, settings,
+        label_b64=label_b64, media_type=media_type,
+        provider=secondary_provider,
+    )
 
 
 def verify_label_diff(
@@ -1284,6 +1289,182 @@ def _cross_validate_linguistic(report) -> "LinguisticReport":
     return report
 
 
+def _reread_verify_issues(
+    report: "LinguisticReport",
+    label_b64: str,
+    media_type: str,
+    provider: AIProvider,
+    settings: AppSettings,
+) -> "LinguisticReport":
+    """Reduce OCR false positives using two strategies:
+
+    1. DETERMINISTIC (no AI call): If OCR confusion detector is high-confidence
+       (>= 0.7) AND the suggestion is a valid Hunspell word → auto-dismiss.
+       Same AI re-reading the same image would likely repeat the same OCR error.
+
+    2. AI RE-READ (fallback): For medium-confidence OCR suspects (0.4-0.7),
+       send the image back with a focused prompt for character-level re-read.
+
+    Returns updated LinguisticReport with OCR false positives filtered out.
+    """
+    from fediaf_verifier.models import LinguisticReport
+    from fediaf_verifier.spellcheck import (
+        _extract_words,
+        _load_dictionary,
+        detect_ocr_confusion,
+    )
+
+    if not report or not report.issues:
+        return report
+
+    lang = report.detected_language or ""
+
+    # Try to load Hunspell for deterministic validation of suggestions
+    hunspell_dict = None
+    try:
+        hunspell_dict = _load_dictionary(lang)
+    except Exception:
+        pass
+
+    # Classify issues into: auto-dismiss (high OCR confidence) vs re-read (medium)
+    auto_dismiss_indices: list[int] = []
+    reread_candidates: list[dict] = []
+    reread_indices: list[int] = []
+
+    for idx, iss in enumerate(report.issues):
+        if iss.issue_type not in ("spelling", "diacritics"):
+            continue
+        if not iss.original or not iss.suggestion:
+            continue
+
+        ocr_check = detect_ocr_confusion(
+            original=iss.original,
+            suggestion=iss.suggestion,
+            language=lang,
+        )
+        if not ocr_check["is_ocr_likely"]:
+            continue
+
+        ocr_conf = ocr_check["confidence"]
+
+        # Strategy 1: High-confidence OCR pattern + valid suggestion → auto-dismiss
+        if ocr_conf >= 0.7 and hunspell_dict is not None:
+            # Extract real words from suggestion (strips punctuation)
+            suggestion_words = _extract_words(iss.suggestion)
+            # Must have at least one checkable word to validate
+            checkable = [w for w in suggestion_words if len(w) > 2]
+            suggestion_valid = len(checkable) > 0 and all(
+                hunspell_dict.lookup(w) or hunspell_dict.lookup(w.lower())
+                or hunspell_dict.lookup(w.title())
+                for w in checkable
+            )
+            if suggestion_valid:
+                auto_dismiss_indices.append(idx)
+                logger.info(
+                    "OCR auto-dismiss: '{}' → '{}' (pattern: {}, conf: {:.1f})",
+                    iss.original, iss.suggestion,
+                    ocr_check["confusion_type"], ocr_conf,
+                )
+                continue
+
+        # Strategy 2: Medium-confidence → queue for AI re-read
+        reread_candidates.append({
+            "original": iss.original,
+            "suggestion": iss.suggestion,
+            "context": iss.context,
+            "ocr_confidence": ocr_conf,
+            "confusion_type": ocr_check["confusion_type"],
+        })
+        reread_indices.append(idx)
+
+    # Apply auto-dismissals
+    issues_updated = list(report.issues)
+    for idx in auto_dismiss_indices:
+        issues_updated[idx].ocr_false_positive = True
+        issues_updated[idx].ocr_reread_word = issues_updated[idx].suggestion
+
+    # AI re-read for remaining candidates (only if there are any)
+    if reread_candidates:
+        logger.info(
+            "Reread: {} issues for AI re-verification...",
+            len(reread_candidates),
+        )
+        try:
+            words_json = json.dumps(
+                [{"original": c["original"], "suggestion": c["suggestion"],
+                  "context": c["context"]}
+                 for c in reread_candidates],
+                ensure_ascii=False,
+            )
+            prompt = build_targeted_reread_prompt(words_json)
+
+            raw = provider.call(
+                prompt=prompt,
+                media_b64=label_b64,
+                media_type=media_type,
+                max_tokens=settings.max_tokens_reread,
+            )
+
+            json_text = extract_json(raw)
+            data = json.loads(json_text)
+
+            reread_results = data.get("reread_results", [])
+
+            # Build lookup: original_flagged → reread result
+            reread_lookup: dict[str, dict] = {}
+            for r in reread_results:
+                key = r.get("original_flagged", "").strip().lower()
+                if key:
+                    reread_lookup[key] = r
+
+            for issue_idx in reread_indices:
+                iss = issues_updated[issue_idx]
+                key = iss.original.strip().lower()
+
+                rr = reread_lookup.get(key)
+                if rr is None:
+                    sugg_key = iss.suggestion.strip().lower()
+                    for rk, rv in reread_lookup.items():
+                        if rv.get("reread_from_image", "").strip().lower() == sugg_key:
+                            rr = rv
+                            break
+
+                if rr is None:
+                    continue
+
+                is_correct = rr.get("is_correct_on_image", False)
+                rr_confidence = rr.get("confidence", "low")
+
+                if is_correct and rr_confidence in ("high", "medium"):
+                    iss.ocr_false_positive = True
+                    iss.ocr_reread_word = rr.get("reread_from_image", "")
+                    logger.info(
+                        "Reread: '{}' confirmed correct on image ('{}')",
+                        iss.original, iss.ocr_reread_word,
+                    )
+
+        except Exception as e:
+            logger.warning("Reread AI call failed (non-blocking): {}", e)
+
+    # Filter out all confirmed OCR false positives
+    filtered_issues = [iss for iss in issues_updated if not iss.ocr_false_positive]
+    total_removed = sum(1 for iss in issues_updated if iss.ocr_false_positive)
+
+    logger.info(
+        "OCR filter: removed {} issues ({} auto-dismissed, {} by re-read)",
+        total_removed, len(auto_dismiss_indices),
+        total_removed - len(auto_dismiss_indices),
+    )
+
+    return LinguisticReport(
+        detected_language=report.detected_language,
+        detected_language_name=report.detected_language_name,
+        issues=filtered_issues,
+        overall_quality=report.overall_quality,
+        summary=report.summary,
+    )
+
+
 def verify_linguistic_only(
     label_b64: str,
     media_type: str,
@@ -1327,6 +1508,12 @@ def verify_linguistic_only(
 
         # Deterministic cross-validation: Hunspell confirms/denies AI findings
         report = _cross_validate_linguistic(report)
+
+        # Targeted re-read: verify OCR-suspect issues against the image
+        if settings.reread_enabled:
+            report = _reread_verify_issues(
+                report, label_b64, media_type, provider, settings
+            )
 
         return LinguisticCheckResult(performed=True, report=report)
 
@@ -1512,6 +1699,9 @@ def _build_enriched_report(
     compliance: ComplianceResult,
     secondary: SecondaryCheck | None,
     settings: AppSettings,
+    label_b64: str = "",
+    media_type: str = "",
+    provider: AIProvider | None = None,
 ) -> EnrichedReport:
     """Assemble all results into the final EnrichedReport."""
     # Cross-check comparison
@@ -1537,6 +1727,12 @@ def _build_enriched_report(
 
         # Deterministic cross-validation: Hunspell confirms/denies AI findings
         report = _cross_validate_linguistic(report)
+
+        # Targeted re-read: verify OCR-suspect issues against the image
+        if settings.reread_enabled and provider and label_b64:
+            report = _reread_verify_issues(
+                report, label_b64, media_type, provider, settings
+            )
 
         linguistic_result = LinguisticCheckResult(
             performed=True,

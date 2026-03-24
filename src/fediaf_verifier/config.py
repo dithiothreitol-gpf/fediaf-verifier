@@ -88,6 +88,10 @@ class AppSettings(BaseSettings):
     # Artwork inspection (AI summary of deterministic findings)
     max_tokens_artwork: int = 8192
 
+    # Targeted re-read (OCR false-positive reduction)
+    max_tokens_reread: int = 2048
+    reread_enabled: bool = True
+
     # Self-verification (reflection step) — doubles API calls but reduces false positives
     self_verify_enabled: bool = True
 

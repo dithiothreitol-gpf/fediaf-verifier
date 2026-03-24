@@ -155,6 +155,59 @@ jesli lista bledow sie zmienila.
 
 WYNIK DO WERYFIKACJI (JSON poniżej):"""
 
+# -- Targeted re-read prompt (OCR false-positive reduction) ----------------------------
+
+
+def build_targeted_reread_prompt(words_json: str) -> str:
+    """Build targeted re-read prompt with words to verify.
+
+    Uses string concatenation (not .format()) to avoid issues
+    with JSON curly braces in the prompt.
+    """
+    return (
+        TARGETED_REREAD_PROMPT_PREFIX
+        + "\n\n"
+        + words_json
+        + "\n\n"
+        + TARGETED_REREAD_PROMPT_SUFFIX
+    )
+
+
+TARGETED_REREAD_PROMPT_PREFIX = """\
+Jestes ekspertem od OCR. Otrzymujesz OBRAZ etykiety oraz liste SLOW, \
+ktore zostaly zidentyfikowane jako potencjalne bledy ortograficzne. \
+Twoje JEDYNE zadanie: odczytac PONOWNIE kazde z tych slow BEZPOSREDNIO \
+z obrazu, litera po literze.
+
+DLA KAZDEGO SLOWA:
+1. Znajdz je na obrazie (uzyj podanego kontekstu do lokalizacji)
+2. Odczytaj KAZDA litere osobno, uwzgledniajac znaki diakrytyczne
+3. Podaj DOKLADNY odczyt z obrazu
+4. Okresl czy slowo na obrazie jest POPRAWNE czy BLEDNE
+
+KRYTYCZNE ZASADY:
+- Patrzysz NA OBRAZ, nie na tekst ponizej — obraz jest zrodlem prawdy
+- Kazda litera osobno — nie "domyslaj sie" calego slowa z kontekstu
+- Znaki diakrytyczne (ą,ę,ś,ć,ź,ż,ł,ń,ó) — sprawdz BARDZO uwaznie \
+czy sa obecne na obrazie
+- Jesli nie mozesz odczytac slowa — wpisz "NIECZYTELNE"
+- NIE poprawiaj tekstu — podaj DOKLADNIE co widzisz na obrazie
+- Jesli na obrazie widzisz poprawne slowo (np. "Wartości" a nie "Waości") \
+to znaczy ze pierwotny odczyt byl bledny — ustaw is_correct_on_image=true
+
+SLOWA DO WERYFIKACJI:"""
+
+TARGETED_REREAD_PROMPT_SUFFIX = """\
+Odpowiedz WYLACZNIE poprawnym JSON (bez markdown):
+{"reread_results": [
+  {"original_flagged": "slowo zgloszne jako bledne", \
+"context": "kontekst z etykiety", \
+"reread_from_image": "co DOKLADNIE widzisz na obrazie", \
+"is_correct_on_image": true/false, \
+"confidence": "high"/"medium"/"low", \
+"notes": "krotki komentarz"}
+]}"""
+
 # -- Label structure & font completeness check prompt ---------------------------------
 
 LABEL_STRUCTURE_PROMPT = """\

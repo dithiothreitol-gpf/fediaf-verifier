@@ -26,6 +26,28 @@ class LinguisticIssue(NullSafeBase):
         default="ai_only",
         description="Verification source: 'ai+hunspell', 'ai_only', 'hunspell_only'",
     )
+    ocr_false_positive: bool = Field(
+        default=False,
+        description="True if targeted re-read determined this is an OCR misread, not a real error",
+    )
+    ocr_reread_word: str = Field(
+        default="",
+        description="What the targeted re-read actually saw on the image",
+    )
+
+
+class RereadResult(NullSafeBase):
+    """Result of targeted re-reading a single word from the image."""
+
+    original_flagged: str = ""
+    context: str = ""
+    reread_from_image: str = ""
+    is_correct_on_image: bool = False
+    confidence: str = Field(
+        default="medium",
+        description="'high'/'medium'/'low' — how confident the re-read is",
+    )
+    notes: str = ""
 
 
 class LinguisticReport(NullSafeBase):

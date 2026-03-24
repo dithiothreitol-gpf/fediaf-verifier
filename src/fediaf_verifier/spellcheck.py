@@ -266,6 +266,186 @@ def check_diacritics_presence(
     }
 
 
+# ---------------------------------------------------------------------------
+# OCR confusion detection
+# ---------------------------------------------------------------------------
+
+# Common OCR misread patterns: (what OCR produces, what was actually there)
+# These represent character groups that vision models commonly merge, drop, or swap.
+_OCR_DROPPED_GROUPS = {
+    "rt", "rn", "ri", "rl", "fi", "fl", "ft", "ff", "ti", "tt",
+    "cl", "li", "il", "ll", "ij", "tj", "rz", "sz", "cz",
+}
+
+# Characters often confused by OCR: (what_OCR_reads, what_is_actually_there)
+# OCR typically merges, strips diacritics, or confuses similar glyphs.
+_OCR_CHAR_SWAPS = [
+    # Glyph merges
+    ("rn", "m"),
+    ("cl", "d"),
+    ("vv", "w"),
+    ("li", "h"),
+    # Look-alikes
+    ("I", "l"),
+    ("0", "O"),
+    ("1", "l"),
+    # Diacritics stripped by OCR (OCR reads plain → real has diacritic)
+    ("l", "ł"),
+    ("o", "ó"),
+    ("a", "ą"),
+    ("e", "ę"),
+    ("s", "ś"),
+    ("c", "ć"),
+    ("z", "ź"),
+    ("z", "ż"),
+    ("n", "ń"),
+]
+
+
+def detect_ocr_confusion(
+    original: str,
+    suggestion: str,
+    language: str = "",
+) -> dict:
+    """Detect if a spelling error likely comes from OCR misreading.
+
+    Compares the original (flagged) word against the suggestion to see
+    if the difference matches known OCR confusion patterns.
+
+    Args:
+        original: The word as read by AI (potentially misread).
+        suggestion: The corrected/suggested word.
+        language: ISO 639-1 code (for language-specific patterns).
+
+    Returns:
+        Dict with:
+          - "is_ocr_likely": bool
+          - "confusion_type": str — description of detected pattern
+          - "confidence": float — 0.0-1.0
+    """
+    if not original or not suggestion:
+        return {"is_ocr_likely": False, "confusion_type": "", "confidence": 0.0}
+
+    orig = normalize_nfc(original.lower())
+    sugg = normalize_nfc(suggestion.lower())
+
+    if orig == sugg:
+        return {"is_ocr_likely": False, "confusion_type": "", "confidence": 0.0}
+
+    reasons: list[str] = []
+    score = 0.0
+
+    # --- Check 1: original is a subsequence of suggestion (dropped chars) ---
+    dropped = _find_dropped_chars(orig, sugg)
+    if dropped is not None and len(dropped) <= 3:
+        score += 0.5
+        reasons.append(f"dropped chars: '{''.join(dropped)}'")
+
+        # Bonus: dropped chars form a known OCR group
+        dropped_str = "".join(dropped)
+        for group in _OCR_DROPPED_GROUPS:
+            if dropped_str in group or group in dropped_str:
+                score += 0.3
+                reasons.append(f"matches OCR drop pattern '{group}'")
+                break
+
+    # --- Check 2: character swap patterns ---
+    for ocr_form, real_form in _OCR_CHAR_SWAPS:
+        if ocr_form in orig and real_form in sugg:
+            replaced = orig.replace(ocr_form, real_form, 1)
+            if replaced == sugg:
+                score += 0.7
+                reasons.append(f"char swap: '{ocr_form}' ↔ '{real_form}'")
+                break
+
+    # --- Check 3: diacritics stripped (common in Polish OCR) ---
+    if language in ("pl", "cs", "hu", "ro"):
+        stripped_sugg = _strip_diacritics(sugg)
+        # Only apply if stripping actually changed the suggestion (had diacritics)
+        if stripped_sugg != sugg:
+            if orig == stripped_sugg:
+                score += 0.6
+                reasons.append("diacritics fully stripped")
+            elif _edit_distance(orig, stripped_sugg) <= 1:
+                score += 0.3
+                reasons.append("near-match after stripping diacritics")
+
+    # --- Check 4: small edit distance — only a tiebreaker, not standalone ---
+    ed = _edit_distance(orig, sugg)
+    if ed == 1 and score > 0:
+        score += 0.2
+    elif ed == 2 and score > 0:
+        score += 0.1
+
+    confidence = min(score, 1.0)
+    return {
+        "is_ocr_likely": confidence >= 0.4,
+        "confusion_type": "; ".join(reasons) if reasons else "",
+        "confidence": confidence,
+    }
+
+
+def _find_dropped_chars(short: str, long: str) -> list[str] | None:
+    """If 'short' can be formed by dropping chars from 'long', return the dropped chars.
+
+    Returns None if short is NOT a subsequence of long.
+    """
+    if len(short) >= len(long):
+        return None
+
+    dropped = []
+    si = 0
+    for li in range(len(long)):
+        if si < len(short) and long[li] == short[si]:
+            si += 1
+        else:
+            dropped.append(long[li])
+
+    return dropped if si == len(short) else None
+
+
+# Characters that don't NFD-decompose but are diacritic variants.
+# ł (U+0142) is the main one in Polish — stroke is part of the glyph.
+_MANUAL_DIACRITIC_MAP = {
+    "ł": "l", "Ł": "L",
+    "đ": "d", "Đ": "D",
+    "ø": "o", "Ø": "O",
+}
+
+
+def _strip_diacritics(text: str) -> str:
+    """Remove diacritical marks from text.
+
+    Uses NFD decompose + strip combining marks, plus manual mapping
+    for characters like ł that don't decompose via NFD.
+    """
+    # First: manual replacements for non-decomposable chars
+    for src, dst in _MANUAL_DIACRITIC_MAP.items():
+        text = text.replace(src, dst)
+    # Then: standard NFD decomposition
+    nfd = unicodedata.normalize("NFD", text)
+    return "".join(c for c in nfd if unicodedata.category(c) != "Mn")
+
+
+def _edit_distance(a: str, b: str) -> int:
+    """Levenshtein edit distance (optimized for short strings)."""
+    if len(a) > len(b):
+        a, b = b, a
+    prev = list(range(len(a) + 1))
+    for j in range(1, len(b) + 1):
+        curr = [j] + [0] * len(a)
+        for i in range(1, len(a) + 1):
+            cost = 0 if a[i - 1] == b[j - 1] else 1
+            curr[i] = min(curr[i - 1] + 1, prev[i] + 1, prev[i - 1] + cost)
+        prev = curr
+    return prev[len(a)]
+
+
+# ---------------------------------------------------------------------------
+# AI linguistic issue cross-validation
+# ---------------------------------------------------------------------------
+
+
 def validate_ai_linguistic_issues(
     ai_issues: list[dict],
     text: str,

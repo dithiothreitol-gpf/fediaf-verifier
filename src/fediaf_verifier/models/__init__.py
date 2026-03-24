@@ -60,6 +60,7 @@ from .linguistic import (
     LinguisticCheckResult,
     LinguisticIssue,
     LinguisticReport,
+    RereadResult,
 )
 from .market_check import MarketCheckReport, MarketCheckResult, MarketRequirement
 from .market_trends import MarketTrends, Positioning
@@ -160,6 +161,7 @@ __all__ = [
     "PrintReadinessReport",
     "QRCodeResult",
     "RecipeClaimCheck",
+    "RereadResult",
     "SEOMetadata",
     "SecondaryCheck",
     "Severity",
