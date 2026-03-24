@@ -50,7 +50,7 @@ class TestFileToBase64:
 
     def test_unsupported_format_raises(self):
         with pytest.raises(UnsupportedFormatError, match="Nieobslugiwany format"):
-            file_to_base64(b"some data", "label.bmp")
+            file_to_base64(b"some data", "label.xyz")
 
     def test_unsupported_format_txt(self):
         with pytest.raises(UnsupportedFormatError):
@@ -66,6 +66,26 @@ class TestFileToBase64:
         img.save(buf, format="WEBP")
         _, media_type = file_to_base64(buf.getvalue(), "label.webp")
         assert media_type == "image/webp"
+
+    def test_bmp_converted_to_png(self):
+        """BMP files should be auto-converted to PNG."""
+        img = Image.new("RGB", (1, 1), color="red")
+        buf = io.BytesIO()
+        img.save(buf, format="BMP")
+        _, media_type = file_to_base64(buf.getvalue(), "screenshot.bmp")
+        assert media_type == "image/png"
+
+    def test_magic_bytes_fallback_detects_png(self):
+        """Files with unknown extension but valid PNG content should work."""
+        png_bytes = _make_png_bytes()
+        _, media_type = file_to_base64(png_bytes, "clipboard_image")
+        assert media_type == "image/png"
+
+    def test_magic_bytes_fallback_detects_jpeg(self):
+        """Files with unknown extension but valid JPEG content should work."""
+        jpeg_bytes = _make_jpeg_bytes()
+        _, media_type = file_to_base64(jpeg_bytes, "pasted_file")
+        assert media_type == "image/jpeg"
 
     def test_roundtrip_png(self):
         """Encode and decode should produce the same bytes."""

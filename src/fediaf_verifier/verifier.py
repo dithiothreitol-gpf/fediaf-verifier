@@ -1260,26 +1260,20 @@ def _cross_validate_linguistic(report) -> "LinguisticReport":
         )
 
         # Rebuild issues with confidence data
-        from fediaf_verifier.models import LinguisticIssue
-
-        new_issues = []
-        for iss_dict in validated:
-            new_issues.append(LinguisticIssue.model_validate(iss_dict))
-
         report = LinguisticReport(
             detected_language=report.detected_language,
             detected_language_name=report.detected_language_name,
-            issues=new_issues,
+            issues=validated,
             overall_quality=report.overall_quality,
             summary=report.summary,
         )
 
         logger.info(
             "Cross-validation: {} issues scored (high={}, medium={}, low={})",
-            len(new_issues),
-            sum(1 for i in new_issues if i.confidence == "high"),
-            sum(1 for i in new_issues if i.confidence == "medium"),
-            sum(1 for i in new_issues if i.confidence == "low"),
+            len(report.issues),
+            sum(1 for i in report.issues if i.confidence == "high"),
+            sum(1 for i in report.issues if i.confidence == "medium"),
+            sum(1 for i in report.issues if i.confidence == "low"),
         )
 
     except ImportError:
@@ -1457,10 +1451,13 @@ def _extract_label_data(
                     "country_codes_present",
                     "polish_text_complete",
                 )
-            ) and isinstance(val, str):
-                data[key] = val.lower().strip() in (
-                    "true", "yes", "tak", "1", "present",
-                )
+            ):
+                if isinstance(val, str):
+                    data[key] = val.lower().strip() in (
+                        "true", "yes", "tak", "1", "present",
+                    )
+                elif isinstance(val, list):
+                    data[key] = len(val) > 0
 
         return LabelExtraction.model_validate(data)
 
@@ -1530,7 +1527,10 @@ def _build_enriched_report(
         report = LinguisticReport(
             detected_language=secondary.detected_language,
             detected_language_name=secondary.detected_language_name,
-            issues=secondary.linguistic_issues,
+            issues=[
+                iss.model_dump() if hasattr(iss, "model_dump") else iss
+                for iss in secondary.linguistic_issues
+            ],
             overall_quality=secondary.overall_language_quality,
             summary=secondary.language_summary,
         )

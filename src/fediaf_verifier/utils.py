@@ -140,8 +140,10 @@ _STATUS_MAP: dict[str, str] = {
 }
 
 
-def fuzzy_lookup(value: str, mapping: dict[str, str]) -> str:
-    """Look up a value in a mapping, trying lowercase prefix match."""
+def fuzzy_lookup(
+    value: str, mapping: dict[str, str], default: str | None = None,
+) -> str:
+    """Look up a value in a mapping, trying lowercase prefix/substring match."""
     if not isinstance(value, str):
         return value
     low = value.lower().strip()
@@ -152,7 +154,11 @@ def fuzzy_lookup(value: str, mapping: dict[str, str]) -> str:
     for key, mapped in mapping.items():
         if low.startswith(key):
             return mapped
-    return value
+    # Substring match (handles "karma pełnoporcjowa mokra" → "wet")
+    for key, mapped in mapping.items():
+        if key in low:
+            return mapped
+    return default if default is not None else value
 
 
 def _to_bool(value: Any) -> bool:

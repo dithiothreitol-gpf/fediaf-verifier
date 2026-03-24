@@ -56,6 +56,28 @@ def _compress_image(file_bytes: bytes, max_size: int = _MAX_B64_SIZE) -> tuple[b
         return file_bytes, ""
 
 
+def _detect_format(file_bytes: bytes) -> str | None:
+    """Detect image/PDF format from magic bytes. Returns extension or None."""
+    if len(file_bytes) < 8:
+        return None
+    header = file_bytes[:8]
+    if header[:3] == b"\xff\xd8\xff":
+        return ".jpg"
+    if header[:8] == b"\x89PNG\r\n\x1a\n":
+        return ".png"
+    if header[:4] == b"RIFF" and file_bytes[8:12] == b"WEBP":
+        return ".webp"
+    if header[:6] in (b"GIF87a", b"GIF89a"):
+        return ".gif"
+    if header[:5] == b"%PDF-":
+        return ".pdf"
+    if header[:4] == b"BM\x00\x00" or header[:2] == b"BM":
+        return ".bmp"
+    if header[:4] in (b"II*\x00", b"MM\x00*"):
+        return ".tiff"
+    return None
+
+
 def file_to_base64(file_bytes: bytes, filename: str) -> tuple[str, str]:
     """Convert a label file to base64.
 
@@ -91,6 +113,23 @@ def file_to_base64(file_bytes: bytes, filename: str) -> tuple[str, str]:
     if suffix == ".gif":
         return base64.b64encode(file_bytes).decode(), "image/gif"
 
+    if suffix in (".bmp", ".tiff", ".tif"):
+        # Convert BMP/TIFF to PNG via Pillow (APIs don't accept these natively)
+        try:
+            from PIL import Image
+
+            img = Image.open(io.BytesIO(file_bytes))
+            if img.mode in ("RGBA", "P"):
+                img = img.convert("RGB")
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            logger.info("Converted {} to PNG", suffix)
+            return base64.b64encode(buf.getvalue()).decode(), "image/png"
+        except Exception as e:
+            raise UnsupportedFormatError(
+                f"Nie udalo sie skonwertowac pliku {suffix} do PNG: {e}"
+            ) from e
+
     if suffix == ".pdf":
         size_mb = len(file_bytes) / 1_048_576
         if size_mb > 25:
@@ -103,6 +142,12 @@ def file_to_base64(file_bytes: bytes, filename: str) -> tuple[str, str]:
 
     if suffix == ".docx":
         return _docx_to_base64(file_bytes)
+
+    # Fallback: detect format from file content (magic bytes)
+    detected = _detect_format(file_bytes)
+    if detected:
+        logger.info("Extension {!r} unknown, detected format from content: {}", suffix, detected)
+        return file_to_base64(file_bytes, f"detected{detected}")
 
     raise UnsupportedFormatError(
         f"Nieobslugiwany format pliku: {suffix}. "

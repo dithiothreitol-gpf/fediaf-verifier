@@ -46,11 +46,13 @@ _LIFESTAGE_MAP: dict[str, str] = {
 }
 
 _FOOD_TYPE_MAP: dict[str, str] = {
-    "dry": "dry", "sucha": "dry", "trocken": "dry",
-    "wet": "wet", "mokra": "wet", "nass": "wet",
+    "dry": "dry", "sucha": "dry", "suchá": "dry", "suché": "dry",
+    "trocken": "dry",
+    "wet": "wet", "mokra": "wet", "mokré": "wet", "mokrá": "wet",
+    "nass": "wet",
     "semi_moist": "semi_moist", "semi-moist": "semi_moist",
     "półwilgotna": "semi_moist", "polwilgotna": "semi_moist",
-    "treat": "treat", "przysmak": "treat",
+    "treat": "treat", "przysmak": "treat", "pamlsok": "treat",
     "supplement": "supplement", "suplement": "supplement",
     "unknown": "unknown",
 }
@@ -196,9 +198,9 @@ def _build_product(ext: LabelExtraction) -> Product:
     return Product(
         name=ext.product_name,
         brand=ext.brand,
-        species=fuzzy_lookup(ext.species or "unknown", _SPECIES_MAP),
-        lifestage=fuzzy_lookup(ext.lifestage or "unknown", _LIFESTAGE_MAP),
-        food_type=fuzzy_lookup(ext.food_type_text or "unknown", _FOOD_TYPE_MAP),
+        species=fuzzy_lookup(ext.species or "unknown", _SPECIES_MAP, default="unknown"),
+        lifestage=fuzzy_lookup(ext.lifestage or "unknown", _LIFESTAGE_MAP, default="unknown"),
+        food_type=fuzzy_lookup(ext.food_type_text or "unknown", _FOOD_TYPE_MAP, default="unknown"),
         net_weight=ext.net_weight,
     )
 
