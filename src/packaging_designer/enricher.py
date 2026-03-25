@@ -25,7 +25,7 @@ REQUIRED_ELEMENTS: dict[ProductCategory, list[dict]] = {
     ProductCategory.PET_FOOD: [
         {
             "id": "ean_barcode",
-            "name": "Kod kreskowy EAN-13",
+            "name": "Kod kreskowy EAN\u201113",
             "priority": ElementPriority.MANDATORY,
             "regulation": "Handel detaliczny",
             "description": "Kod kreskowy wymagany dla produktu detalicznego",
@@ -33,18 +33,18 @@ REQUIRED_ELEMENTS: dict[ProductCategory, list[dict]] = {
         },
         {
             "id": "ingredients_list",
-            "name": "Skład / Lista składników",
+            "name": "Sk\u0142ad / Lista sk\u0142adnik\u00f3w",
             "priority": ElementPriority.MANDATORY,
             "regulation": "EU 767/2009 Art.17",
-            "description": "Lista składników w kolejności malejącej masy",
+            "description": "Lista sk\u0142adnik\u00f3w w kolejno\u015bci malej\u0105cej masy",
             "category": "regulatory",
         },
         {
             "id": "nutrition_table",
-            "name": "Składniki analityczne",
+            "name": "Sk\u0142adniki analityczne",
             "priority": ElementPriority.MANDATORY,
             "regulation": "EU 767/2009 Art.17",
-            "description": "Białko, tłuszcz, włókno, popiół, wilgotność",
+            "description": "Bia\u0142ko, t\u0142uszcz, w\u0142\u00f3kno, popi\u00f3\u0142, wilgotno\u015b\u0107",
             "category": "regulatory",
         },
         {
@@ -65,10 +65,10 @@ REQUIRED_ELEMENTS: dict[ProductCategory, list[dict]] = {
         },
         {
             "id": "best_before",
-            "name": "Data ważności",
+            "name": "Data wa\u017cno\u015bci",
             "priority": ElementPriority.MANDATORY,
             "regulation": "EU 767/2009 Art.17",
-            "description": "Obszar na datę 'Najlepiej użyć przed...'",
+            "description": "Obszar na dat\u0119 \u201eNajlepiej u\u017cy\u0107 przed\u2026\u201d",
             "category": "regulatory",
         },
         {
@@ -81,10 +81,10 @@ REQUIRED_ELEMENTS: dict[ProductCategory, list[dict]] = {
         },
         {
             "id": "feeding_guidelines",
-            "name": "Zalecenia żywieniowe",
+            "name": "Zalecenia \u017cywieniowe",
             "priority": ElementPriority.MANDATORY,
             "regulation": "EU 767/2009 Art.17",
-            "description": "Tabela dawkowania wg masy ciała",
+            "description": "Tabela dawkowania wg masy cia\u0142a",
             "category": "regulatory",
         },
         {
@@ -108,7 +108,7 @@ REQUIRED_ELEMENTS: dict[ProductCategory, list[dict]] = {
             "name": "Tidyman",
             "priority": ElementPriority.OPTIONAL,
             "regulation": None,
-            "description": "Symbol zachęcający do utylizacji",
+            "description": "Symbol zach\u0119caj\u0105cy do utylizacji",
             "category": "regulatory",
         },
         {
@@ -116,14 +116,14 @@ REQUIRED_ELEMENTS: dict[ProductCategory, list[dict]] = {
             "name": "Zielony Punkt",
             "priority": ElementPriority.OPTIONAL,
             "regulation": None,
-            "description": "Symbol Green Dot (w krajach wymagających)",
+            "description": "Symbol Green Dot (w krajach wymagaj\u0105cych)",
             "category": "regulatory",
         },
     ],
     ProductCategory.FOOD: [
         {
             "id": "ean_barcode",
-            "name": "Kod kreskowy EAN-13",
+            "name": "Kod kreskowy EAN\u201113",
             "priority": ElementPriority.MANDATORY,
             "regulation": "Handel detaliczny",
             "description": "Kod kreskowy wymagany dla produktu detalicznego",
@@ -131,18 +131,18 @@ REQUIRED_ELEMENTS: dict[ProductCategory, list[dict]] = {
         },
         {
             "id": "ingredients_list",
-            "name": "Lista składników",
+            "name": "Lista sk\u0142adnik\u00f3w",
             "priority": ElementPriority.MANDATORY,
             "regulation": "EU 1169/2011 Art.9",
-            "description": "Lista składników w kolejności malejącej masy",
+            "description": "Lista sk\u0142adnik\u00f3w w kolejno\u015bci malej\u0105cej masy",
             "category": "regulatory",
         },
         {
             "id": "nutrition_table",
-            "name": "Tabela wartości odżywczych",
+            "name": "Tabela warto\u015bci od\u017cywczych",
             "priority": ElementPriority.MANDATORY,
             "regulation": "EU 1169/2011 Art.9",
-            "description": "Energia, tłuszcz, węglowodany, białko, sól",
+            "description": "Energia, t\u0142uszcz, w\u0119glowodany, bia\u0142ko, s\u00f3l",
             "category": "regulatory",
         },
         {
@@ -150,7 +150,7 @@ REQUIRED_ELEMENTS: dict[ProductCategory, list[dict]] = {
             "name": "Waga netto",
             "priority": ElementPriority.MANDATORY,
             "regulation": "EU 1169/2011 Art.9",
-            "description": "Ilość netto żywności",
+            "description": "Ilo\u015b\u0107 netto \u017cywno\u015bci",
             "category": "regulatory",
         },
         {
@@ -163,10 +163,10 @@ REQUIRED_ELEMENTS: dict[ProductCategory, list[dict]] = {
         },
         {
             "id": "best_before",
-            "name": "Data minimalnej trwałości",
+            "name": "Data minimalnej trwa\u0142o\u015bci",
             "priority": ElementPriority.MANDATORY,
             "regulation": "EU 1169/2011 Art.9",
-            "description": "'Najlepiej spożyć przed...' lub 'Należy spożyć do...'",
+            "description": "\u201eNajlepiej spo\u017cy\u0107 przed\u2026\u201d lub \u201eNale\u017cy spo\u017cy\u0107 do\u2026\u201d",
             "category": "regulatory",
         },
         {
@@ -174,7 +174,7 @@ REQUIRED_ELEMENTS: dict[ProductCategory, list[dict]] = {
             "name": "Alergeny",
             "priority": ElementPriority.MANDATORY,
             "regulation": "EU 1169/2011 Art.21",
-            "description": "Alergeny wyróżnione w składzie (bold/underline)",
+            "description": "Alergeny wyr\u00f3\u017cnione w sk\u0142adzie (bold/underline)",
             "category": "regulatory",
         },
         {
@@ -182,7 +182,7 @@ REQUIRED_ELEMENTS: dict[ProductCategory, list[dict]] = {
             "name": "Symbol recyklingu",
             "priority": ElementPriority.RECOMMENDED,
             "regulation": "EU PPWR 2025/40",
-            "description": "Oznakowanie materiałowe opakowania",
+            "description": "Oznakowanie materia\u0142owe opakowania",
             "category": "regulatory",
         },
     ],
@@ -192,7 +192,7 @@ REQUIRED_ELEMENTS: dict[ProductCategory, list[dict]] = {
 _DEFAULT_REQUIRED = [
     {
         "id": "ean_barcode",
-        "name": "Kod kreskowy EAN-13",
+        "name": "Kod kreskowy EAN\u201113",
         "priority": ElementPriority.RECOMMENDED,
         "regulation": None,
         "description": "Kod kreskowy produktu",

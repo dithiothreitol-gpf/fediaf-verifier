@@ -15,7 +15,7 @@ if _STANDALONE:
     try:
         st.set_page_config(
             page_title="AI Packaging Designer",
-            page_icon="📦",
+            page_icon="\U0001f4e6",
             layout="wide",
         )
     except st.errors.StreamlitAPIException:
@@ -28,7 +28,7 @@ from packaging_designer.models.package_spec import ProductCategory
 
 
 def _get_provider():
-    """Get AI provider — reuses fediaf_verifier config when available."""
+    """Get AI provider \u2014 reuses fediaf_verifier config when available."""
     try:
         from fediaf_verifier.config import get_settings
         from fediaf_verifier.verifier import create_providers
@@ -57,7 +57,7 @@ def _get_provider():
     if not api_key:
         st.error(
             "Brak klucza API. Ustaw ANTHROPIC_API_KEY w zmiennych "
-            "srodowiskowych lub w pliku .env"
+            "\u015brodowiskowych lub w pliku .env"
         )
         st.stop()
     return AnthropicProvider(api_key=api_key, model="claude-sonnet-4-6")
@@ -100,8 +100,8 @@ def _render_sidebar() -> tuple[ProductCategory, float, str]:
                 ProductCategory.OTHER,
             ],
             format_func=lambda c: {
-                ProductCategory.PET_FOOD: "Karma dla zwierzat",
-                ProductCategory.FOOD: "Zywnosc",
+                ProductCategory.PET_FOOD: "Karma dla zwierz\u0105t",
+                ProductCategory.FOOD: "\u017bywno\u015b\u0107",
                 ProductCategory.COSMETICS: "Kosmetyki",
                 ProductCategory.SUPPLEMENTS: "Suplementy",
                 ProductCategory.OTHER: "Inne",
@@ -113,17 +113,17 @@ def _render_sidebar() -> tuple[ProductCategory, float, str]:
         )
 
         export_format = st.radio(
-            "Format wyjsciowy",
-            options=["Illustrator (.jsx)", "JSX + podglad PNG"],
+            "Format wyj\u015bciowy",
+            options=["Illustrator (.jsx)", "JSX + podgl\u0105d PNG"],
             index=1,
         )
 
         st.markdown("---")
         st.markdown(
             "**Instrukcja:**\n"
-            "1. Zaladuj grafike koncepcyjna\n"
-            "2. Kliknij 'Analizuj'\n"
-            "3. Zaznacz brakujace elementy\n"
+            "1. Za\u0142aduj grafik\u0119 koncepcyjn\u0105\n"
+            "2. Kliknij \u201eAnalizuj\u201d\n"
+            "3. Zaznacz brakuj\u0105ce elementy\n"
             "4. Pobierz pakiet ZIP\n"
             "5. Uruchom .jsx w Illustratorze"
         )
@@ -148,13 +148,13 @@ def _render_analysis_results(analysis: DesignAnalysis):
 
     if spec.product_name or spec.brand_name:
         st.info(
-            f"**Produkt:** {spec.product_name or '—'}  |  "
-            f"**Marka:** {spec.brand_name or '—'}"
+            f"**Produkt:** {spec.product_name or '\u2014'}  |  "
+            f"**Marka:** {spec.brand_name or '\u2014'}"
         )
 
     # Colors
     if analysis.color_swatches:
-        st.markdown("**Paleta kolorow CMYK:**")
+        st.markdown("**Paleta kolor\u00f3w CMYK:**")
         cols = st.columns(min(len(analysis.color_swatches), 8))
         for i, swatch in enumerate(analysis.color_swatches[:8]):
             with cols[i]:
@@ -175,7 +175,7 @@ def _render_analysis_results(analysis: DesignAnalysis):
             for tb in analysis.text_blocks:
                 st.markdown(
                     f"- **[{tb.role}]** {tb.content[:80]}"
-                    f" — *{tb.font_style}, {tb.font_size_pt or '?'}pt*"
+                    f" \u2014 *{tb.font_style}, {tb.font_size_pt or '?'}pt*"
                 )
 
     # Graphics
@@ -214,9 +214,9 @@ def _render_enrichment_ui(analysis: DesignAnalysis) -> tuple[list[str], str | No
 
     for elem in missing:
         icon = {
-            ElementPriority.MANDATORY: "🔴",
-            ElementPriority.RECOMMENDED: "🟡",
-            ElementPriority.OPTIONAL: "⚪",
+            ElementPriority.MANDATORY: "\U0001f534",
+            ElementPriority.RECOMMENDED: "\U0001f7e1",
+            ElementPriority.OPTIONAL: "\u26aa",
         }.get(elem.priority, "")
 
         default_on = elem.priority in (
@@ -274,7 +274,7 @@ def _render_export(
     col1, col2 = st.columns(2)
     with col1:
         st.download_button(
-            label="Pobierz pakiet Illustrator (.zip)",
+            label="\u2b07\ufe0f Pobierz pakiet Illustrator (.zip)",
             data=zip_bytes,
             file_name="packaging_design_ai.zip",
             mime="application/zip",
@@ -288,7 +288,7 @@ def _render_export(
 
     with col2:
         st.download_button(
-            label="Pobierz sam skrypt .jsx",
+            label="\U0001f4c4 Pobierz sam skrypt .jsx",
             data=jsx_content,
             file_name="packaging_design.jsx",
             mime="text/plain",
@@ -303,13 +303,13 @@ def _render_export(
             preview_bytes = build_preview_png(
                 analysis=analysis, concept_image=concept_bytes
             )
-            st.image(preview_bytes, caption="Podglad z zaznaczonymi elementami")
+            st.image(preview_bytes, caption="Podgl\u0105d z zaznaczonymi elementami")
         except Exception as e:
-            st.warning(f"Nie udalo sie wygenerowac podgladu: {e}")
+            st.warning(f"Nie uda\u0142o si\u0119 wygenerowa\u0107 podgl\u0105du: {e}")
 
     # Show JSX preview
-    with st.expander("Podglad skryptu JSX"):
-        st.code(jsx_content[:3000] + "\n// ... (skrocone)", language="javascript")
+    with st.expander("Podgl\u0105d skryptu JSX"):
+        st.code(jsx_content[:3000] + "\n// ... (skr\u00f3cone)", language="javascript")
 
 
 # ---------------------------------------------------------------------------
@@ -321,7 +321,7 @@ def main():
 
     st.title("AI Packaging Designer")
     st.markdown(
-        "Zaladuj grafike koncepcyjna opakowania — narzedzie zanalizuje ja, "
+        "Za\u0142aduj grafik\u0119 koncepcyjn\u0105 opakowania \u2014 narz\u0119dzie zanalizuje j\u0105, "
         "zidentyfikuje elementy i wygeneruje roboczy plik DTP."
     )
 
@@ -331,17 +331,17 @@ def main():
         uploaded = st.file_uploader(
             "Grafika koncepcyjna",
             type=["png", "jpg", "jpeg", "pdf", "webp"],
-            help="PNG/JPG/PDF — koncept wygenerowany przez AI lub mockup",
+            help="PNG/JPG/PDF \u2014 koncept wygenerowany przez AI lub mockup",
         )
     with col_ctx:
         product_context = st.text_area(
             "Kontekst produktu (opcjonalnie)",
-            placeholder="Np. Karma mokra dla kotow, 85g saszetka, marka XYZ...",
+            placeholder="Np. Karma mokra dla kot\u00f3w, 85g saszetka, marka XYZ...",
             height=100,
         )
 
     if not uploaded:
-        st.info("Zaladuj grafike koncepcyjna aby rozpoczac.")
+        st.info("Za\u0142aduj grafik\u0119 koncepcyjn\u0105, aby rozpocz\u0105\u0107.")
         return
 
     # Read and cache file bytes
@@ -351,11 +351,11 @@ def main():
     st.session_state.concept_media_type = media_type
 
     # Show uploaded image
-    st.image(concept_bytes, caption="Zaladowana grafika", width=400)
+    st.image(concept_bytes, caption="Za\u0142adowana grafika", width=400)
 
     # --- STEP 2: Analysis ---
-    if st.button("Analizuj grafike", type="primary", use_container_width=True):
-        with st.spinner("Analizuje z Claude Vision..."):
+    if st.button("Analizuj grafik\u0119", type="primary", use_container_width=True):
+        with st.spinner("Analizuj\u0119 z Claude Vision\u2026"):
             try:
                 provider = _get_provider()
                 from packaging_designer.pipeline import run_analysis
@@ -371,7 +371,7 @@ def main():
                 st.rerun()
             except Exception as e:
                 logger.exception("Analysis failed")
-                st.error(f"Blad analizy: {e}")
+                st.error(f"B\u0142\u0105d analizy: {e}")
                 return
 
     analysis: DesignAnalysis | None = st.session_state.analysis
@@ -385,11 +385,11 @@ def main():
 
     # --- STEP 4: Enrichment ---
     st.markdown("---")
-    st.subheader("Brakujace elementy")
+    st.subheader("Brakuj\u0105ce elementy")
     selected_ids, ean_number = _render_enrichment_ui(analysis)
 
     if selected_ids:
-        if st.button("Generuj brakujace elementy", use_container_width=True):
+        if st.button("Generuj brakuj\u0105ce elementy", use_container_width=True):
             from packaging_designer.pipeline import run_enrichment
 
             enrichment = run_enrichment(
@@ -399,7 +399,7 @@ def main():
             )
             st.session_state.enrichment = enrichment
             st.success(
-                f"Wygenerowano {len(enrichment.generated_assets)} assetow"
+                f"Wygenerowano {len(enrichment.generated_assets)} asset\u00f3w"
             )
 
     # --- STEP 5: Export ---
