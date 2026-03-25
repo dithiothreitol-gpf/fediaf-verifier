@@ -386,7 +386,7 @@ with st.sidebar:
         _pd_target_lang = _pd_lang_codes[_pd_lang_idx]
         _pd_target_name = list(_TRANSLATION_LANGUAGES.values())[_pd_lang_idx]
 
-    elif not is_linguistic_only and not is_structure_check and not is_design_analysis and not is_ean_check and not is_claims_check and not is_presentation_check and not is_market_check and not is_label_text_gen and not is_diff_check and not is_product_desc and not is_artwork_check:
+    elif not is_linguistic_only and not is_structure_check and not is_design_analysis and not is_ean_check and not is_claims_check and not is_presentation_check and not is_market_check and not is_label_text_gen and not is_diff_check and not is_product_desc and not is_artwork_check and not is_packaging_designer:
         # Full verification mode — market selector
         market_selection = st.selectbox(
             "Rynek docelowy",
@@ -400,7 +400,7 @@ with st.sidebar:
             None if market_selection == MARKETS[0] else market_selection
         )
 
-    if not is_linguistic_only and not is_structure_check and not is_translation and not is_design_analysis and not is_ean_check and not is_claims_check and not is_presentation_check and not is_market_check and not is_label_text_gen and not is_diff_check and not is_product_desc and not is_artwork_check:
+    if not is_linguistic_only and not is_structure_check and not is_translation and not is_design_analysis and not is_ean_check and not is_claims_check and not is_presentation_check and not is_market_check and not is_label_text_gen and not is_diff_check and not is_product_desc and not is_artwork_check and not is_packaging_designer:
         st.divider()
 
         pdf_path = settings.fediaf_pdf_path
@@ -414,11 +414,14 @@ with st.sidebar:
             st.error("Nie uda\u0142o si\u0119 pobra\u0107 FEDIAF Guidelines.")
             st.stop()
 
-    st.divider()
-    st.subheader("\U0001f4d6 Podr\u0119cznik u\u017cytkownika")
+    if is_packaging_designer:
+        pass  # Packaging Designer renders its own sidebar content
+    else:
+      st.divider()
+      st.subheader("\U0001f4d6 Podr\u0119cznik u\u017cytkownika")
 
-    # -- "Jak zacz\u0105\u0107?" — depends on mode --
-    with st.expander("Jak zacz\u0105\u0107?"):
+      # -- "Jak zacz\u0105\u0107?" — depends on mode --
+      with st.expander("Jak zacz\u0105\u0107?"):
         if is_translation:
             st.markdown("""\
 1. **Wgraj etykiet\u0119** (JPG/PNG/PDF) lub **wklej tekst** (max 2000 znak\u00f3w)
