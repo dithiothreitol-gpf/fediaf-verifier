@@ -221,7 +221,7 @@ class TestModels:
 
 class TestBarcode:
     def test_generate_ean13_svg(self):
-        from packaging_designer.generators.barcode import generate_ean13_svg
+        from packaging_designer.generators.barcode_gen import generate_ean13_svg
 
         svg = generate_ean13_svg("5901234123457")
         assert svg.startswith("<?xml")
@@ -229,14 +229,14 @@ class TestBarcode:
         assert "5901234123457" in svg or "590123412345" in svg
 
     def test_generate_ean13_svg_12_digits(self):
-        from packaging_designer.generators.barcode import generate_ean13_svg
+        from packaging_designer.generators.barcode_gen import generate_ean13_svg
 
         # 12 digits — check digit calculated automatically
         svg = generate_ean13_svg("590123412345")
         assert "<svg" in svg
 
     def test_generate_ean13_invalid(self):
-        from packaging_designer.generators.barcode import generate_ean13_svg
+        from packaging_designer.generators.barcode_gen import generate_ean13_svg
 
         with pytest.raises(Exception):
             generate_ean13_svg("123")  # too short

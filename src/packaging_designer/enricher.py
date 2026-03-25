@@ -6,7 +6,7 @@ and suggests additions.
 
 from __future__ import annotations
 
-from packaging_designer.generators.barcode import generate_ean13_svg
+from packaging_designer.generators.barcode_gen import generate_ean13_svg
 from packaging_designer.generators.symbols import (
     get_symbol_size_mm,
     load_symbol_svg,
