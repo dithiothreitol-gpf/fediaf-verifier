@@ -1,0 +1,57 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//BULT QA//Task Calendar//PL
+CALSCALE:GREGORIAN
+METHOD:PUBLISH
+X-WR-CALNAME:BULT QA — Rozwój aplikacji
+X-WR-TIMEZONE:Europe/Warsaw
+BEGIN:VEVENT
+DTSTART;VALUE=DATE:20260317
+DTEND;VALUE=DATE:20260318
+SUMMARY:Inicjalizacja projektu i fundament aplikacji
+DESCRIPTION:Utworzenie repozytorium\, struktury projektu\, konfiguracji (pyproject.toml\, .env)\, README.\nZbudowanie fundamentu: moduł weryfikacji (verifier.py)\, prompty AI\, modele danych (Product\, Nutrients\, Report\, Issues\, EU Labelling\, Cross-Check\, Linguistic)\, eksport raportów\, konwerter plików\, interfejs Streamlit z trybem pełnej weryfikacji\, reguły FEDIAF (rules.py) z progami żywieniowymi\, testy jednostkowe.\nDev Container dla VS Code.
+STATUS:CONFIRMED
+END:VEVENT
+BEGIN:VEVENT
+DTSTART;VALUE=DATE:20260318
+DTEND;VALUE=DATE:20260319
+SUMMARY:Compliance engine + multi-provider AI + Docker
+DESCRIPTION:Silnik compliance (deterministyczny\, niezależny od AI): scoring 0-100\, status COMPLIANT/REQUIRES_REVIEW/NON_COMPLIANT\, model ekstrakcji danych z etykiety\, 30+ kontroli opakowania.\nAbstrakcja multi-provider AI (Anthropic Claude / Google Gemini / OpenAI GPT).\nKonteneryzacja Docker (Dockerfile\, docker-compose.yml)\, reverse proxy Caddy\, konfiguracja Streamlit (dark theme\, wide layout).
+STATUS:CONFIRMED
+END:VEVENT
+BEGIN:VEVENT
+DTSTART;VALUE=DATE:20260319
+DTEND;VALUE=DATE:20260320
+SUMMARY:8 nowych trybów + eksporty JSX + renderery raportów
+DESCRIPTION:Nowe tryby: Kontrola struktury i czcionki\, Analiza designu\, Tłumaczenie etykiety\, Walidator claimów\, Walidator EAN/kodów\, Walidator rynkowy (14 krajów)\, Generator tekstu etykiety\, Porównanie wersji.\nModele danych: label_structure\, design_analysis\, translation\, claims_check\, ean_check\, label_diff\, label_text\, market_check.\nAnnotator PDF\, generator skryptów JSX dla Adobe Illustrator\, generator ramek tekstowych JSX.\nRenderery raportów (renderers.py) — wizualizacja wyników dla każdego trybu.\nNullSafeBase — ochrona modeli przed null z API.
+STATUS:CONFIRMED
+END:VEVENT
+BEGIN:VEVENT
+DTSTART;VALUE=DATE:20260320
+DTEND;VALUE=DATE:20260321
+SUMMARY:Optymalizacja promptów + zbieranie danych treningowych
+DESCRIPTION:Tuning i optymalizacja promptów AI dla wszystkich trybów.\nModuł zbierania danych treningowych (data_collector.py) do przyszłego fine-tuningu.\nPoprawki konwertera plików i providerów AI.
+STATUS:CONFIRMED
+END:VEVENT
+BEGIN:VEVENT
+DTSTART;VALUE=DATE:20260323
+DTEND;VALUE=DATE:20260324
+SUMMARY:Generator opisów e-commerce + spellcheck + artwork + benchmarki
+DESCRIPTION:Generator opisów produktów (4 style tonalne\, SEO\, HTML\, walidacja claimów).\nSpellcheck Hunspell (9 języków\, 18 plików słowników) z detekcją OCR confusion.\nInspekcja artwork (OpenCV\, scikit-image): pixel diff SSIM\, kolory K-means\, Delta E\, print readiness\, ICC\, saliency.\nSystem benchmarków designu (8 segmentów x 10 kategorii\, self-learning).\nWeryfikator prezentacji handlowej (receptury\, nazwy Art.17\, marka\, znaki towarowe).\nManager rozszerzeń opcjonalnych (OCR\, Saliency\, PDF).\nWalidator dodatków paszowych.\nAnaliza konkurencyjna vs Neurons Predict i GlobalVision.\nPortal konfiguracyjny (Homepage dashboard).
+STATUS:CONFIRMED
+END:VEVENT
+BEGIN:VEVENT
+DTSTART;VALUE=DATE:20260324
+DTEND;VALUE=DATE:20260325
+SUMMARY:Spellcheck cross-validation + targeted re-read + testy
+DESCRIPTION:Integracja Hunspell z AI: cross-walidacja (3 poziomy pewności: high/medium/low).\nTargeted re-read — ponowny odczyt konkretnych słów z obrazu w celu eliminacji fałszywych alarmów OCR.\nSelf-verify (reflection step) — AI weryfikuje własne wyniki.\nRozbudowa compliance engine.\nTesty konwertera plików.\nEksport PDF analizy konkurencyjnej.
+STATUS:CONFIRMED
+END:VEVENT
+BEGIN:VEVENT
+DTSTART;VALUE=DATE:20260325
+DTEND;VALUE=DATE:20260326
+SUMMARY:Podręcznik użytkownika dla Marketingu i R&D
+DESCRIPTION:Kompletny podręcznik użytkownika (docs/USER_MANUAL.md\, 2291 linii):\n- 10 rozdziałów + 4 załączniki\n- Opis wszystkich 13 trybów wg szablonu (przeznaczenie\, korzyści\, przypadki użycia Marketing/R&D\, wejścia\, przebieg\, raport\, eksporty\, czas)\n- Słownik ~50 pojęć\, FAQ\, wskazówki workflow per dział\n- Tabele FEDIAF\, EU 767/2009\, 14 krajów\, 30+ kontroli opakowania\n- Weryfikacja vs kod źródłowy (13 przycisków\, progi\, kraje\, języki\, eksporty).
+STATUS:CONFIRMED
+END:VEVENT
+END:VCALENDAR

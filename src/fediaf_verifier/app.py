@@ -237,6 +237,7 @@ _MODE_LABEL_TEXT = "\U0001f4dd Generator tekstu etykiety"
 _MODE_DIFF = "\U0001f504 Por\u00f3wnanie wersji"
 _MODE_PRODUCT_DESC = "\U0001f4dd Generator opis\u00f3w produkt\u00f3w"
 _MODE_ARTWORK = "\U0001f50d Inspekcja artwork"
+_MODE_PACKAGING = "\U0001f4e6 Packaging Designer"
 
 _TRANSLATION_LANGUAGES = {
     "en": "English",
@@ -260,11 +261,12 @@ with st.sidebar:
     _GROUP_VERIFY = "\U0001f50d Weryfikacja"
     _GROUP_TOOLS = "\U0001f527 Narz\u0119dzia"
     _GROUP_DESIGN = "\U0001f3a8 Design"
+    _GROUP_PACKAGING = "\U0001f4e6 Packaging"
 
     st.header("\U0001f43e BULT QA")
     _mode_group = st.segmented_control(
         "Kategoria",
-        [_GROUP_VERIFY, _GROUP_TOOLS, _GROUP_DESIGN],
+        [_GROUP_VERIFY, _GROUP_TOOLS, _GROUP_DESIGN, _GROUP_PACKAGING],
         default=_GROUP_VERIFY,
         label_visibility="collapsed",
     )
@@ -284,6 +286,9 @@ with st.sidebar:
             [_MODE_TRANSLATION, _MODE_LABEL_TEXT, _MODE_PRODUCT_DESC, _MODE_DIFF, _MODE_EAN],
             label_visibility="collapsed",
         )
+    elif _mode_group == _GROUP_PACKAGING:
+        verification_mode = _MODE_PACKAGING
+        st.caption("Koncept AI \u2192 roboczy plik DTP (Illustrator/InDesign)")
     else:
         verification_mode = _MODE_DESIGN
         st.caption("Ocena designu etykiety z rekomendacjami dla R&D")
@@ -300,6 +305,7 @@ with st.sidebar:
     is_diff_check = verification_mode == _MODE_DIFF
     is_product_desc = verification_mode == _MODE_PRODUCT_DESC
     is_artwork_check = verification_mode == _MODE_ARTWORK
+    is_packaging_designer = verification_mode == _MODE_PACKAGING
 
     # -- Mode-specific options --
     st.divider()
@@ -1366,6 +1372,12 @@ elif is_label_text_gen:
 elif is_product_desc and _pd_input_mode == "manual":
     # Product description manual mode — uses form instead of file uploader
     uploaded = None
+elif is_packaging_designer:
+    # Packaging Designer has its own complete UI — render and stop
+    uploaded = None
+    from packaging_designer.app import main as _packaging_main
+    _packaging_main()
+    st.stop()
 else:
     uploaded = st.file_uploader(
         "Wgraj etykiet\u0119 produktu",

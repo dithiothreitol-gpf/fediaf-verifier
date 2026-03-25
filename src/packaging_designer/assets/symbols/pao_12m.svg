@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 100" width="80" height="100">
+  <!-- PAO symbol - Period After Opening (open jar) -->
+  <!-- Jar body -->
+  <path d="M15 35 L15 85 Q15 90 20 90 L60 90 Q65 90 65 85 L65 35 Z"
+        fill="none" stroke="#231F20" stroke-width="3"/>
+  <!-- Jar opening -->
+  <path d="M12 35 L68 35" stroke="#231F20" stroke-width="3"/>
+  <!-- Lid (tilted off) -->
+  <path d="M40 10 L68 18 L65 30 L37 22 Z"
+        fill="none" stroke="#231F20" stroke-width="2.5"/>
+  <!-- Period text -->
+  <text x="40" y="72" font-family="Arial, sans-serif" font-size="22"
+        font-weight="bold" text-anchor="middle" fill="#231F20">12M</text>
+</svg>
