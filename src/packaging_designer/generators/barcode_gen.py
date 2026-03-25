@@ -4,9 +4,6 @@ from __future__ import annotations
 
 from io import BytesIO
 
-from barcode import EAN13
-from barcode.writer import SVGWriter
-
 
 def generate_ean13_svg(
     number: str,
@@ -29,6 +26,9 @@ def generate_ean13_svg(
     Returns:
         SVG string of the barcode.
     """
+    from barcode import EAN13
+    from barcode.writer import SVGWriter
+
     number = number.strip().replace(" ", "")
 
     writer = SVGWriter()

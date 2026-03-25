@@ -6,7 +6,6 @@ and suggests additions.
 
 from __future__ import annotations
 
-from packaging_designer.generators.barcode_gen import generate_ean13_svg
 from packaging_designer.generators.symbols import (
     get_symbol_size_mm,
     load_symbol_svg,
@@ -258,6 +257,8 @@ def generate_selected_assets(
 
     for element_id in selected_ids:
         if element_id == "ean_barcode" and ean_number:
+            from packaging_designer.generators.barcode_gen import generate_ean13_svg
+
             svg = generate_ean13_svg(ean_number)
             assets.append(
                 GeneratedAsset(
