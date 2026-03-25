@@ -9,17 +9,16 @@ from __future__ import annotations
 import streamlit as st
 from loguru import logger
 
-# set_page_config only when running standalone (not embedded)
-_STANDALONE = __name__ == "__main__" or "fediaf_verifier" not in str(st.session_state.get("_main_app", ""))
-if _STANDALONE:
-    try:
-        st.set_page_config(
-            page_title="AI Packaging Designer",
-            page_icon="\U0001f4e6",
-            layout="wide",
-        )
-    except st.errors.StreamlitAPIException:
-        pass  # Already set by parent app
+# set_page_config only when running standalone — when embedded,
+# the parent app already called set_page_config
+try:
+    st.set_page_config(
+        page_title="AI Packaging Designer",
+        page_icon="\U0001f4e6",
+        layout="wide",
+    )
+except st.errors.StreamlitAPIException:
+    pass  # Already set by parent app (embedded mode)
 
 from packaging_designer.models.design_elements import DesignAnalysis
 from packaging_designer.models.enrichment import ElementPriority, EnrichmentResult
@@ -69,10 +68,11 @@ def _get_provider():
 def _init_state():
     """Initialize session state with defaults."""
     defaults = {
-        "analysis": None,
-        "enrichment": None,
-        "concept_bytes": None,
-        "concept_media_type": None,
+        "pkg_analysis": None,
+        "pkg_enrichment": None,
+        "pkg_concept_bytes": None,
+        "pkg_media_type": None,
+        "pkg_back_label": None,
     }
     for key, val in defaults.items():
         if key not in st.session_state:
@@ -84,7 +84,7 @@ def _init_state():
 # ---------------------------------------------------------------------------
 
 
-def _render_sidebar() -> tuple[ProductCategory, float, str]:
+def _render_sidebar() -> tuple[ProductCategory, float, str, bool]:
     """Render sidebar with configuration."""
     with st.sidebar:
         st.title("AI Packaging Designer")
@@ -114,8 +114,12 @@ def _render_sidebar() -> tuple[ProductCategory, float, str]:
 
         export_format = st.radio(
             "Format wyj\u015bciowy",
-            options=["Illustrator (.jsx)", "JSX + podgl\u0105d PNG"],
-            index=1,
+            options=[
+                "Illustrator (.jsx)",
+                "InDesign (.idml)",
+                "Oba (Illustrator + InDesign)",
+            ],
+            index=0,
         )
 
         st.markdown("---")
@@ -124,12 +128,16 @@ def _render_sidebar() -> tuple[ProductCategory, float, str]:
             "1. Za\u0142aduj grafik\u0119 koncepcyjn\u0105\n"
             "2. Kliknij \u201eAnalizuj\u201d\n"
             "3. Zaznacz brakuj\u0105ce elementy\n"
-            "4. Pobierz pakiet ZIP\n"
-            "5. Uruchom .jsx w Illustratorze"
+            "4. Opcjonalnie: back label, dieline, 3D\n"
+            "5. Pobierz pakiet ZIP\n"
+            "6. Uruchom .jsx w AI / otw\u00f3rz .idml w ID"
         )
-        st.caption("v0.1.0 MVP")
 
-        return category, bleed_mm, export_format
+        st.markdown("---")
+        batch_mode = st.toggle("Tryb wsadowy (batch)", key="batch_mode_toggle")
+        st.caption("v0.2.0")
+
+        return category, bleed_mm, export_format, batch_mode
 
 
 def _render_analysis_results(analysis: DesignAnalysis):
@@ -251,79 +259,180 @@ def _render_export(
     bleed_mm: float,
 ):
     """Render export section with download buttons."""
-    from packaging_designer.builders.jsx_builder import build_jsx
-    from packaging_designer.models.export_config import ExportConfig
-    from packaging_designer.pipeline import create_jsx_package
+    from packaging_designer.models.export_config import ExportConfig, ExportFormat
 
-    config = ExportConfig(bleed_mm=bleed_mm)
+    want_jsx = "Illustrator" in export_format or "Oba" in export_format
+    want_idml = "InDesign" in export_format or "Oba" in export_format
 
-    jsx_content = build_jsx(
-        analysis=analysis,
-        enrichment=enrichment,
-        config=config,
-        include_concept=concept_bytes is not None,
-    )
+    # --- Illustrator JSX ---
+    if want_jsx:
+        from packaging_designer.builders.jsx_builder import build_jsx
+        from packaging_designer.pipeline import create_jsx_package
 
-    # Create ZIP package
-    zip_bytes = create_jsx_package(
-        jsx_content=jsx_content,
-        enrichment=enrichment,
-        concept_image=concept_bytes,
-    )
+        config = ExportConfig(bleed_mm=bleed_mm)
+        jsx_content = build_jsx(
+            analysis=analysis,
+            enrichment=enrichment,
+            config=config,
+            include_concept=concept_bytes is not None,
+        )
+        zip_bytes = create_jsx_package(
+            jsx_content=jsx_content,
+            enrichment=enrichment,
+            concept_image=concept_bytes,
+        )
 
-    col1, col2 = st.columns(2)
-    with col1:
+        st.markdown("#### Illustrator")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.download_button(
+                label="\u2b07\ufe0f Pobierz pakiet Illustrator (.zip)",
+                data=zip_bytes,
+                file_name="packaging_design_ai.zip",
+                mime="application/zip",
+                type="primary",
+                use_container_width=True,
+            )
+            st.caption(
+                "Zawiera: `packaging_design.jsx` + `assets/`\n\n"
+                "Uruchom: **File > Scripts > Other Script...**"
+            )
+        with col2:
+            st.download_button(
+                label="\U0001f4c4 Sam skrypt .jsx",
+                data=jsx_content,
+                file_name="packaging_design.jsx",
+                mime="text/plain",
+                use_container_width=True,
+            )
+
+        with st.expander("Podgl\u0105d JSX"):
+            st.code(jsx_content[:2000] + "\n// ...", language="javascript")
+
+    # --- InDesign IDML ---
+    if want_idml:
+        from packaging_designer.builders.idml_builder import build_idml
+
+        config_idml = ExportConfig(bleed_mm=bleed_mm)
+        idml_bytes = build_idml(
+            analysis=analysis,
+            enrichment=enrichment,
+            config=config_idml,
+        )
+
+        st.markdown("#### InDesign")
         st.download_button(
-            label="\u2b07\ufe0f Pobierz pakiet Illustrator (.zip)",
-            data=zip_bytes,
-            file_name="packaging_design_ai.zip",
-            mime="application/zip",
-            type="primary",
+            label="\u2b07\ufe0f Pobierz plik InDesign (.idml)",
+            data=idml_bytes,
+            file_name="packaging_design.idml",
+            mime="application/vnd.adobe.indesign-idml-package",
+            type="primary" if not want_jsx else "secondary",
             use_container_width=True,
         )
         st.caption(
-            "Zawiera: `packaging_design.jsx` + `assets/`\n\n"
-            "Uruchom w Illustratorze: **File > Scripts > Other Script...**"
+            "Otw\u00f3rz bezpo\u015brednio w InDesign (CS4+).\n\n"
+            "Plik zawiera: warstwy, kolory CMYK, ramki tekstowe, wymiary strony."
         )
 
-    with col2:
-        st.download_button(
-            label="\U0001f4c4 Pobierz sam skrypt .jsx",
-            data=jsx_content,
-            file_name="packaging_design.jsx",
-            mime="text/plain",
-            use_container_width=True,
+    # --- Preview ---
+    from packaging_designer.builders.preview_builder import build_preview_png
+
+    try:
+        preview_bytes = build_preview_png(
+            analysis=analysis, concept_image=concept_bytes
         )
-
-    # Preview
-    if "PNG" in export_format:
-        from packaging_designer.builders.preview_builder import build_preview_png
-
-        try:
-            preview_bytes = build_preview_png(
-                analysis=analysis, concept_image=concept_bytes
-            )
-            st.image(preview_bytes, caption="Podgl\u0105d z zaznaczonymi elementami")
-        except Exception as e:
-            st.warning(f"Nie uda\u0142o si\u0119 wygenerowa\u0107 podgl\u0105du: {e}")
-
-    # Show JSX preview
-    with st.expander("Podgl\u0105d skryptu JSX"):
-        st.code(jsx_content[:3000] + "\n// ... (skr\u00f3cone)", language="javascript")
+        st.image(preview_bytes, caption="Podgl\u0105d z zaznaczonymi elementami")
+    except Exception as e:
+        st.warning(f"Podgl\u0105d niedost\u0119pny: {e}")
 
 
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+def _render_batch_ui(export_format: str, bleed_mm: float):
+    """Render batch processing UI."""
+    st.subheader("Tryb wsadowy")
+    st.markdown("Za\u0142aduj wiele grafik koncepcyjnych \u2014 ka\u017cda zostanie przetworzona osobno.")
+
+    batch_files = st.file_uploader(
+        "Grafiki koncepcyjne",
+        type=["png", "jpg", "jpeg"],
+        accept_multiple_files=True,
+        key="batch_files",
+    )
+
+    if not batch_files:
+        st.info("Za\u0142aduj pliki, aby rozpocz\u0105\u0107 przetwarzanie wsadowe.")
+        return
+
+    st.write(f"Za\u0142adowano {len(batch_files)} plik\u00f3w")
+
+    gen_jsx = "Illustrator" in export_format or "Oba" in export_format
+    gen_idml = "InDesign" in export_format or "Oba" in export_format
+
+    if st.button("Przetw\u00f3rz wsadowo", type="primary", use_container_width=True):
+        from packaging_designer.batch import BatchItem, package_batch_results, run_batch
+
+        items = []
+        for f in batch_files:
+            raw = f.read()
+            items.append(BatchItem(
+                filename=f.name,
+                image_bytes=raw,
+                media_type=f.type or "image/png",
+            ))
+
+        progress = st.progress(0, text="Przetwarzanie\u2026")
+
+        def on_progress(current, total, name):
+            progress.progress(current / total, text=f"[{current}/{total}] {name}")
+
+        try:
+            provider = _get_provider()
+            results = run_batch(
+                items=items,
+                provider=provider,
+                generate_jsx=gen_jsx,
+                generate_idml=gen_idml,
+                bleed_mm=bleed_mm,
+                on_progress=on_progress,
+            )
+
+            ok = sum(1 for r in results if r.success)
+            fail = sum(1 for r in results if not r.success)
+            st.success(f"Gotowe: {ok} sukces\u00f3w, {fail} b\u0142\u0119d\u00f3w")
+
+            zip_bytes = package_batch_results(
+                results, include_jsx=gen_jsx, include_idml=gen_idml,
+            )
+            st.download_button(
+                label=f"Pobierz wyniki ({ok} plik\u00f3w)",
+                data=zip_bytes,
+                file_name="batch_packaging_output.zip",
+                mime="application/zip",
+                type="primary",
+                use_container_width=True,
+            )
+
+        except Exception as e:
+            logger.exception("Batch failed")
+            st.error(f"B\u0142\u0105d: {e}")
+
+
 def main():
     _init_state()
-    category, bleed_mm, export_format = _render_sidebar()
+    category, bleed_mm, export_format, batch_mode = _render_sidebar()
 
     st.title("AI Packaging Designer")
     st.markdown(
         "Za\u0142aduj grafik\u0119 koncepcyjn\u0105 opakowania \u2014 narz\u0119dzie zanalizuje j\u0105, "
         "zidentyfikuje elementy i wygeneruje roboczy plik DTP."
     )
+
+    # --- BATCH MODE ---
+    if batch_mode:
+        _render_batch_ui(export_format, bleed_mm)
+        return
 
     # --- STEP 1: Upload ---
     col_upload, col_ctx = st.columns([2, 1])
@@ -340,22 +449,26 @@ def main():
             height=100,
         )
 
-    if not uploaded:
+    if uploaded:
+        # Cache file bytes in session state so they survive reruns
+        raw = uploaded.read()
+        if raw:
+            st.session_state.pkg_concept_bytes = raw
+            st.session_state.pkg_media_type = uploaded.type or "image/png"
+
+    concept_bytes: bytes | None = st.session_state.get("pkg_concept_bytes")
+    media_type: str = st.session_state.get("pkg_media_type", "image/png")
+
+    if not concept_bytes:
         st.info("Za\u0142aduj grafik\u0119 koncepcyjn\u0105, aby rozpocz\u0105\u0107.")
         return
-
-    # Read and cache file bytes
-    concept_bytes = uploaded.read()
-    media_type = uploaded.type or "image/png"
-    st.session_state.concept_bytes = concept_bytes
-    st.session_state.concept_media_type = media_type
 
     # Show uploaded image
     st.image(concept_bytes, caption="Za\u0142adowana grafika", width=400)
 
     # --- STEP 2: Analysis ---
     if st.button("Analizuj grafik\u0119", type="primary", use_container_width=True):
-        with st.spinner("Analizuj\u0119 z Claude Vision\u2026"):
+        with st.spinner("Analizowanie z AI\u2026"):
             try:
                 provider = _get_provider()
                 from packaging_designer.pipeline import run_analysis
@@ -366,15 +479,15 @@ def main():
                     provider=provider,
                     product_context=product_context,
                 )
-                st.session_state.analysis = analysis
-                st.session_state.enrichment = None  # reset enrichment
+                st.session_state.pkg_analysis = analysis
+                st.session_state.pkg_enrichment = None  # reset enrichment
                 st.rerun()
             except Exception as e:
                 logger.exception("Analysis failed")
                 st.error(f"B\u0142\u0105d analizy: {e}")
                 return
 
-    analysis: DesignAnalysis | None = st.session_state.analysis
+    analysis: DesignAnalysis | None = st.session_state.pkg_analysis
     if not analysis:
         return
 
@@ -397,21 +510,123 @@ def main():
                 selected_ids=selected_ids,
                 ean_number=ean_number,
             )
-            st.session_state.enrichment = enrichment
+            st.session_state.pkg_enrichment = enrichment
             st.success(
                 f"Wygenerowano {len(enrichment.generated_assets)} asset\u00f3w"
             )
 
+    # --- STEP 4b: Back label (optional) ---
+    st.markdown("---")
+    generate_back = st.toggle("Generuj tyln\u0105 etykiet\u0119 (back label)", key="toggle_back")
+
+    if generate_back:
+        back_lang = st.selectbox(
+            "J\u0119zyk tylnej etykiety",
+            ["pl", "en", "de", "fr", "cs"],
+            format_func=lambda c: {
+                "pl": "Polski", "en": "English", "de": "Deutsch",
+                "fr": "Fran\u00e7ais", "cs": "\u010ce\u0161tina",
+            }.get(c, c),
+            key="back_lang",
+        )
+        back_context = st.text_area(
+            "Dodatkowe dane produktu (sk\u0142adniki, producent\u2026)",
+            placeholder="Sk\u0142ad: mi\u0119so z kurczaka 40%, ry\u017c 20%...\nProducent: Firma X, ul. Y, Warszawa",
+            key="back_context",
+            height=100,
+        )
+
+        if st.button("Generuj back label", use_container_width=True):
+            with st.spinner("Generowanie tylnej etykiety\u2026"):
+                try:
+                    from packaging_designer.back_label import generate_back_label
+
+                    provider = _get_provider()
+                    back_content = generate_back_label(
+                        analysis=analysis,
+                        provider=provider,
+                        language=back_lang,
+                        user_context=back_context,
+                    )
+                    st.session_state.pkg_back_label = back_content
+                    st.success(f"Wygenerowano {len(back_content.sections)} sekcji")
+                except Exception as e:
+                    logger.exception("Back label failed")
+                    st.error(f"B\u0142\u0105d generowania: {e}")
+
+        # Display back label content
+        back_label = st.session_state.get("pkg_back_label")
+        if back_label:
+            with st.expander("Podgl\u0105d tylnej etykiety", expanded=True):
+                for sec in back_label.sections:
+                    if sec.title:
+                        st.markdown(f"**{sec.title}**")
+                    st.text(sec.content)
+                    st.markdown("---")
+                if back_label.feeding_table:
+                    st.markdown("**Tabela dawkowania:**")
+                    for row in back_label.feeding_table:
+                        st.text(f"  {row.weight_range}  \u2192  {row.daily_amount}")
+
+    # --- STEP 4c: Dieline preview ---
+    st.markdown("---")
+    show_dieline = st.toggle("Poka\u017c dieline (wykrojnik)", key="toggle_dieline")
+    if show_dieline:
+        from packaging_designer.generators.dieline import get_dieline_svg
+
+        dieline_svg = get_dieline_svg(
+            package_type=analysis.package_spec.package_type.value,
+            width_mm=analysis.package_spec.dimensions.width_mm,
+            height_mm=analysis.package_spec.dimensions.height_mm,
+            depth_mm=analysis.package_spec.dimensions.depth_mm,
+            bleed_mm=bleed_mm,
+        )
+        # st.image cannot render raw SVG — use HTML embed
+        import base64 as _b64
+        svg_b64 = _b64.b64encode(dieline_svg.encode()).decode()
+        st.markdown(
+            f'<img src="data:image/svg+xml;base64,{svg_b64}" '
+            f'style="max-width:100%;background:white;padding:10px;border-radius:8px;" '
+            f'alt="Dieline"/>',
+            unsafe_allow_html=True,
+        )
+        st.caption("Dieline / wykrojnik")
+        st.download_button(
+            label="Pobierz dieline (.svg)",
+            data=dieline_svg,
+            file_name="dieline.svg",
+            mime="image/svg+xml",
+        )
+
+    # --- STEP 4d: 3D mockup ---
+    st.markdown("---")
+    show_mockup = st.toggle("Poka\u017c 3D mockup", key="toggle_mockup")
+    if show_mockup:
+        from packaging_designer.builders.mockup_3d import generate_3d_mockup
+
+        try:
+            mockup_bytes = generate_3d_mockup(
+                analysis=analysis,
+                concept_image=concept_bytes,
+            )
+            st.image(mockup_bytes, caption="3D mockup")
+        except Exception as e:
+            st.warning(f"Mockup niedost\u0119pny: {e}")
+
     # --- STEP 5: Export ---
     st.markdown("---")
     st.subheader("Eksport DTP")
-    _render_export(
-        analysis=analysis,
-        enrichment=st.session_state.enrichment,
-        concept_bytes=concept_bytes,
-        export_format=export_format,
-        bleed_mm=bleed_mm,
-    )
+    try:
+        _render_export(
+            analysis=analysis,
+            enrichment=st.session_state.pkg_enrichment,
+            concept_bytes=concept_bytes,
+            export_format=export_format,
+            bleed_mm=bleed_mm,
+        )
+    except Exception as e:
+        logger.exception("Export rendering failed")
+        st.error(f"B\u0142\u0105d eksportu: {e}")
 
 
 if __name__ == "__main__":

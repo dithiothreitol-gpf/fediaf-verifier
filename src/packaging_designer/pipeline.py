@@ -14,6 +14,7 @@ from zipfile import ZipFile
 from loguru import logger
 
 from packaging_designer.analyzer import analyze_concept
+from packaging_designer.builders.idml_builder import build_idml
 from packaging_designer.builders.jsx_builder import build_jsx
 from packaging_designer.builders.preview_builder import build_preview_png
 from packaging_designer.enricher import enrich
@@ -92,7 +93,23 @@ def run_export(
                 format=ExportFormat.ILLUSTRATOR_JSX,
                 file_name="packaging_design.jsx",
                 content_str=jsx_content,
-                description="Illustrator ExtendScript — uruchom w File > Scripts",
+                description="Illustrator ExtendScript \u2014 uruchom w File > Scripts",
+            )
+        )
+
+    # Generate InDesign IDML
+    if ExportFormat.INDESIGN_IDML in config.formats:
+        idml_bytes = build_idml(
+            analysis=analysis,
+            enrichment=enrichment,
+            config=config,
+        )
+        bundle.files.append(
+            OutputFile(
+                format=ExportFormat.INDESIGN_IDML,
+                file_name="packaging_design.idml",
+                content=idml_bytes,
+                description="InDesign IDML \u2014 otw\u00f3rz bezpo\u015brednio w InDesign",
             )
         )
 
