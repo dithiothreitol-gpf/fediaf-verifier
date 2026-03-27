@@ -1,3 +1,4 @@
+-e .
 anthropic>=0.85.0
 google-genai>=1.0.0
 openai>=1.60.0
