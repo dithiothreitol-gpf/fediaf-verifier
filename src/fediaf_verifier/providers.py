@@ -151,6 +151,9 @@ class AnthropicProvider:
                 ) from e
             raise ProviderAPIError(str(e)) from e
         except anthropic.APIError as e:
+            # 529 Overloaded — treat as rate limit (retryable)
+            if getattr(e, "status_code", 0) == 529:
+                raise ProviderRateLimitError(str(e)) from e
             raise ProviderAPIError(str(e)) from e
 
         text_blocks = [b.text for b in response.content if hasattr(b, "text")]
@@ -202,6 +205,8 @@ class AnthropicProvider:
         except anthropic.RateLimitError as e:
             raise ProviderRateLimitError(str(e)) from e
         except anthropic.APIError as e:
+            if getattr(e, "status_code", 0) == 529:
+                raise ProviderRateLimitError(str(e)) from e
             raise ProviderAPIError(str(e)) from e
 
         text_blocks = [b.text for b in response.content if hasattr(b, "text")]

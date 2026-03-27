@@ -238,6 +238,7 @@ _MODE_DIFF = "\U0001f504 Por\u00f3wnanie wersji"
 _MODE_PRODUCT_DESC = "\U0001f4dd Generator opis\u00f3w produkt\u00f3w"
 _MODE_ARTWORK = "\U0001f50d Inspekcja artwork"
 _MODE_PACKAGING = "\U0001f4e6 Packaging Designer"
+_MODE_CATALOG_TRANSLATION = "\U0001f4d1 T\u0142umaczenie katalogu"
 
 _TRANSLATION_LANGUAGES = {
     "en": "English",
@@ -283,7 +284,7 @@ with st.sidebar:
     elif _mode_group == _GROUP_TOOLS:
         verification_mode = st.selectbox(
             "Narz\u0119dzie",
-            [_MODE_TRANSLATION, _MODE_LABEL_TEXT, _MODE_PRODUCT_DESC, _MODE_DIFF, _MODE_EAN],
+            [_MODE_TRANSLATION, _MODE_CATALOG_TRANSLATION, _MODE_LABEL_TEXT, _MODE_PRODUCT_DESC, _MODE_DIFF, _MODE_EAN],
             label_visibility="collapsed",
         )
     elif _mode_group == _GROUP_PACKAGING:
@@ -306,6 +307,7 @@ with st.sidebar:
     is_product_desc = verification_mode == _MODE_PRODUCT_DESC
     is_artwork_check = verification_mode == _MODE_ARTWORK
     is_packaging_designer = verification_mode == _MODE_PACKAGING
+    is_catalog_translation = verification_mode == _MODE_CATALOG_TRANSLATION
 
     # -- Mode-specific options --
     st.divider()
@@ -353,6 +355,42 @@ with st.sidebar:
             "zachowaj styl formalny...",
         )
 
+    elif is_catalog_translation:
+        st.subheader("Opcje t\u0142umaczenia katalogu")
+        _ct_tl_display = [
+            f"{name} ({code})"
+            for code, name in _TRANSLATION_LANGUAGES.items()
+        ]
+        _ct_tl_selection = st.selectbox("J\u0119zyk docelowy", _ct_tl_display, key="ct_lang")
+        _ct_tl_idx = _ct_tl_display.index(_ct_tl_selection)
+        _ct_tl_codes = list(_TRANSLATION_LANGUAGES.keys())
+        _ct_target_lang = _ct_tl_codes[_ct_tl_idx]
+        _ct_target_name = list(_TRANSLATION_LANGUAGES.values())[_ct_tl_idx]
+
+        st.divider()
+
+        _ct_glossary_file = st.file_uploader(
+            "S\u0142ownik terminologii (opcjonalnie)",
+            type=["json"],
+            help="Plik JSON ze s\u0142ownikiem. Domy\u015blnie: pet_food_{lang}.json",
+            key="ct_glossary",
+        )
+
+        _ct_page_range = st.text_input(
+            "Zakres stron",
+            value="all",
+            help='np. "all", "1-10", "1,3,5-8"',
+            key="ct_pages",
+        )
+
+        _ct_dry_run = st.checkbox(
+            "Dry run (tylko ekstrakcja)",
+            value=False,
+            key="ct_dry",
+        )
+
+        _ct_validate = st.checkbox("Walidacja po t\u0142umaczeniu", value=True, key="ct_val")
+
     elif is_product_desc:
         st.subheader("Opcje opisu produktu")
         _pd_input_mode = st.radio(
@@ -386,7 +424,7 @@ with st.sidebar:
         _pd_target_lang = _pd_lang_codes[_pd_lang_idx]
         _pd_target_name = list(_TRANSLATION_LANGUAGES.values())[_pd_lang_idx]
 
-    elif not is_linguistic_only and not is_structure_check and not is_design_analysis and not is_ean_check and not is_claims_check and not is_presentation_check and not is_market_check and not is_label_text_gen and not is_diff_check and not is_product_desc and not is_artwork_check and not is_packaging_designer:
+    elif not is_linguistic_only and not is_structure_check and not is_design_analysis and not is_ean_check and not is_claims_check and not is_presentation_check and not is_market_check and not is_label_text_gen and not is_diff_check and not is_product_desc and not is_artwork_check and not is_packaging_designer and not is_catalog_translation:
         # Full verification mode — market selector
         market_selection = st.selectbox(
             "Rynek docelowy",
@@ -400,7 +438,7 @@ with st.sidebar:
             None if market_selection == MARKETS[0] else market_selection
         )
 
-    if not is_linguistic_only and not is_structure_check and not is_translation and not is_design_analysis and not is_ean_check and not is_claims_check and not is_presentation_check and not is_market_check and not is_label_text_gen and not is_diff_check and not is_product_desc and not is_artwork_check and not is_packaging_designer:
+    if not is_linguistic_only and not is_structure_check and not is_translation and not is_design_analysis and not is_ean_check and not is_claims_check and not is_presentation_check and not is_market_check and not is_label_text_gen and not is_diff_check and not is_product_desc and not is_artwork_check and not is_packaging_designer and not is_catalog_translation:
         st.divider()
 
         pdf_path = settings.fediaf_pdf_path
@@ -414,8 +452,8 @@ with st.sidebar:
             st.error("Nie uda\u0142o si\u0119 pobra\u0107 FEDIAF Guidelines.")
             st.stop()
 
-    if is_packaging_designer:
-        pass  # Packaging Designer renders its own sidebar content
+    if is_packaging_designer or is_catalog_translation:
+        pass  # These modes render their own complete sidebar/UI
     else:
       st.divider()
       st.subheader("\U0001f4d6 Podr\u0119cznik u\u017cytkownika")
@@ -1375,6 +1413,19 @@ elif is_label_text_gen:
 elif is_product_desc and _pd_input_mode == "manual":
     # Product description manual mode — uses form instead of file uploader
     uploaded = None
+elif is_catalog_translation:
+    # Catalog Translator has its own complete UI — render and stop
+    uploaded = None
+    from catalog_translator.app import main as _catalog_main
+    _catalog_main(
+        target_lang=_ct_target_lang,
+        target_lang_name=_ct_target_name,
+        page_range=_ct_page_range,
+        dry_run=_ct_dry_run,
+        run_validation=_ct_validate,
+        glossary_file=_ct_glossary_file,
+    )
+    st.stop()
 elif is_packaging_designer:
     # Packaging Designer has its own complete UI — render and stop
     uploaded = None
