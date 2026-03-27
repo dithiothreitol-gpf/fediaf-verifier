@@ -31,7 +31,12 @@ def _parse_page_range(page_range: str, total_pages: int) -> list[int]:
 
 
 def _extract_blocks_from_page(page_dict: dict, page_index: int) -> list[TextBlock]:
-    """Extract TextBlock objects from pymupdf page dict output."""
+    """Extract TextBlock objects from pymupdf page dict output.
+
+    Works at the pymupdf *block* level (≈ paragraph), not at span level.
+    All spans within a block are concatenated into a single TextBlock,
+    using the dominant (most frequent) font for metadata.
+    """
     blocks: list[TextBlock] = []
     block_index = 0
 
@@ -39,67 +44,58 @@ def _extract_blocks_from_page(page_dict: dict, page_index: int) -> list[TextBloc
         if block.get("type") != 0:  # 0 = text block
             continue
 
-        for line in block.get("lines", []):
-            for span in line.get("spans", []):
-                text = span.get("text", "").strip()
-                if not text:
-                    continue
+        # Collect all text and font info from spans in this block
+        line_texts: list[str] = []
+        span_fonts: list[tuple[str, float, bool, int]] = []  # (font, size, bold, char_count)
 
-                bbox = span.get("bbox", (0, 0, 0, 0))
+        for line in block.get("lines", []):
+            span_texts_in_line: list[str] = []
+            for span in line.get("spans", []):
+                text = span.get("text", "")
+                if not text.strip():
+                    continue
+                span_texts_in_line.append(text.strip())
+
                 font = span.get("font", "")
                 size = span.get("size", 0.0)
                 flags = span.get("flags", 0)
-                is_bold = bool(flags & 2**4)  # bit 4 = bold
+                is_bold = bool(flags & 2**4)
+                span_fonts.append((font, size, is_bold, len(text)))
 
-                blocks.append(
-                    TextBlock(
-                        text=text,
-                        bbox=tuple(bbox),
-                        font_name=font,
-                        font_size=round(size, 1),
-                        is_bold=is_bold,
-                        block_index=block_index,
-                    )
-                )
-                block_index += 1
+            if span_texts_in_line:
+                line_texts.append(" ".join(span_texts_in_line))
+
+        full_text = " ".join(line_texts).strip()
+        if not full_text:
+            continue
+
+        # Dominant font = the one covering the most characters
+        if span_fonts:
+            # Pick font with most characters
+            best = max(span_fonts, key=lambda f: f[3])
+            font_name = best[0]
+            font_size = round(best[1], 1)
+            is_bold = best[2]
+        else:
+            font_name = ""
+            font_size = 0.0
+            is_bold = False
+
+        bbox = block.get("bbox", (0, 0, 0, 0))
+
+        blocks.append(
+            TextBlock(
+                text=full_text,
+                bbox=tuple(bbox),
+                font_name=font_name,
+                font_size=font_size,
+                is_bold=is_bold,
+                block_index=block_index,
+            )
+        )
+        block_index += 1
 
     return blocks
-
-
-def _merge_adjacent_blocks(blocks: list[TextBlock], y_threshold: float = 3.0) -> list[TextBlock]:
-    """Merge spans that are on the same line (similar Y position) into single blocks."""
-    if not blocks:
-        return []
-
-    merged: list[TextBlock] = []
-    current = blocks[0]
-
-    for blk in blocks[1:]:
-        # Same line: similar Y position and same font characteristics
-        same_y = abs(blk.bbox[1] - current.bbox[1]) < y_threshold
-        same_font = blk.font_name == current.font_name and abs(blk.font_size - current.font_size) < 0.5
-
-        if same_y and same_font:
-            # Merge: extend text and bbox
-            current = TextBlock(
-                text=current.text + " " + blk.text,
-                bbox=(
-                    min(current.bbox[0], blk.bbox[0]),
-                    min(current.bbox[1], blk.bbox[1]),
-                    max(current.bbox[2], blk.bbox[2]),
-                    max(current.bbox[3], blk.bbox[3]),
-                ),
-                font_name=current.font_name,
-                font_size=current.font_size,
-                is_bold=current.is_bold,
-                block_index=current.block_index,
-            )
-        else:
-            merged.append(current)
-            current = blk
-
-    merged.append(current)
-    return merged
 
 
 def extract_catalog(
@@ -140,18 +136,16 @@ def extract_catalog(
             b for b in raw_blocks if margin_top <= b.bbox[1] <= margin_bottom
         ]
 
-        merged = _merge_adjacent_blocks(content_blocks)
-
-        if merged:
+        if content_blocks:
             pages.append(
                 PageExtraction(
                     page_number=idx + 1,  # 1-based
-                    blocks=merged,
+                    blocks=content_blocks,
                     width=round(width, 1),
                     height=round(height, 1),
                 )
             )
-            logger.debug("Page {}: {} blocks extracted", idx + 1, len(merged))
+            logger.debug("Page {}: {} blocks extracted", idx + 1, len(content_blocks))
         else:
             logger.info("Page {}: no text content, skipping", idx + 1)
 
