@@ -1453,7 +1453,7 @@ if uploaded:
     col_preview, col_info = st.columns([1, 2])
     with col_preview:
         if uploaded.type and uploaded.type.startswith("image"):
-            st.image(uploaded, caption=uploaded.name, width="stretch")
+            st.image(uploaded, caption=uploaded.name, use_container_width=True)
         else:
             st.markdown(
                 f'<div style="background:var(--secondary-background-color);'
@@ -2182,7 +2182,7 @@ def _run_diff_check(old_file, new_file) -> None:
 _has_translation_input = uploaded or bool(_translation_source_text.strip())
 
 if is_translation and _has_translation_input and st.button(
-    "Przet\u0142umacz", type="primary", use_container_width=True
+    "Przet\u0142umacz", type="primary", width="stretch"
 ):
     _run_translation(
         uploaded if uploaded else None,
@@ -2193,42 +2193,42 @@ if is_translation and _has_translation_input and st.button(
     )
 
 if uploaded and is_claims_check and st.button(
-    "Sprawd\u017a claimy", type="primary", use_container_width=True
+    "Sprawd\u017a claimy", type="primary", width="stretch"
 ):
     _run_claims_check(uploaded)
 
 if uploaded and is_presentation_check and st.button(
-    "Sprawd\u017a prezentacj\u0119 handlow\u0105", type="primary", use_container_width=True
+    "Sprawd\u017a prezentacj\u0119 handlow\u0105", type="primary", width="stretch"
 ):
     _run_presentation_check(uploaded)
 
 if uploaded and is_market_check and st.button(
-    "Sprawd\u017a zgodno\u015b\u0107 rynkow\u0105", type="primary", use_container_width=True
+    "Sprawd\u017a zgodno\u015b\u0107 rynkow\u0105", type="primary", width="stretch"
 ):
     _run_market_check(uploaded, _market_target_code)
 
 if is_label_text_gen and _label_text_form_data.get("ingredients", "").strip() and st.button(
-    "Generuj tekst etykiety", type="primary", use_container_width=True
+    "Generuj tekst etykiety", type="primary", width="stretch"
 ):
     _run_label_text(_label_text_form_data)
 
 if is_product_desc and _pd_input_mode == "manual" and _product_desc_form_data.get("ingredients", "").strip() and st.button(
-    "Generuj opis produktu", type="primary", use_container_width=True
+    "Generuj opis produktu", type="primary", width="stretch"
 ):
     _run_product_description(_product_desc_form_data)
 
 if is_product_desc and _pd_input_mode == "image" and uploaded and st.button(
-    "Generuj opis produktu z etykiety", type="primary", use_container_width=True
+    "Generuj opis produktu z etykiety", type="primary", width="stretch"
 ):
     _run_product_description(None, uploaded)
 
 if is_diff_check and uploaded_old and uploaded_new and st.button(
-    "Por\u00f3wnaj wersje", type="primary", use_container_width=True
+    "Por\u00f3wnaj wersje", type="primary", width="stretch"
 ):
     _run_diff_check(uploaded_old, uploaded_new)
 
 if uploaded and is_ean_check and st.button(
-    "Sprawd\u017a kody", type="primary", use_container_width=True
+    "Sprawd\u017a kody", type="primary", width="stretch"
 ):
     _run_ean_check(uploaded)
 
@@ -2238,7 +2238,7 @@ _artwork_ready = (
     and (_artwork_mode == "single" or _artwork_proof is not None)
 )
 if _artwork_ready and st.button(
-    "Inspekcja artwork", type="primary", use_container_width=True
+    "Inspekcja artwork", type="primary", width="stretch"
 ):
     _run_artwork_inspection(_artwork_master, _artwork_proof, _artwork_threshold)
 
@@ -2259,21 +2259,21 @@ if uploaded and is_design_analysis:
         format_func=lambda k: _SEGMENT_LABELS[k],
         index=0,
     )
-    if st.button("Analizuj design", type="primary", use_container_width=True):
+    if st.button("Analizuj design", type="primary", width="stretch"):
         _run_design_analysis(uploaded, segment=_design_segment)
 
 if uploaded and is_structure_check and st.button(
-    "Sprawd\u017a struktur\u0119", type="primary", use_container_width=True
+    "Sprawd\u017a struktur\u0119", type="primary", width="stretch"
 ):
     _run_structure_check(uploaded)
 
 if uploaded and is_linguistic_only and st.button(
-    "Sprawd\u017a j\u0119zyk", type="primary", use_container_width=True
+    "Sprawd\u017a j\u0119zyk", type="primary", width="stretch"
 ):
     _run_linguistic_only(uploaded)
 
 if uploaded and not is_linguistic_only and not is_structure_check and not is_translation and not is_design_analysis and not is_ean_check and not is_claims_check and not is_presentation_check and not is_market_check and not is_label_text_gen and not is_diff_check and not is_product_desc and not is_artwork_check and st.button(
-    "Sprawd\u017a etykiet\u0119", type="primary", use_container_width=True
+    "Sprawd\u017a etykiet\u0119", type="primary", width="stretch"
 ):
     _run_verification(uploaded, selected_market)
 

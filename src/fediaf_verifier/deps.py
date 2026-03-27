@@ -150,7 +150,7 @@ def render_feature_manager() -> None:
                 if st.button(
                     f"\U0001f4e5 Instaluj {feat.name}",
                     key=f"install_{key}",
-                    use_container_width=True,
+                    width="stretch",
                 ):
                     with st.spinner(
                         f"Instaluje {feat.name}... "

@@ -473,7 +473,7 @@ def render_report(
             data=to_json(report),
             file_name=f"raport_{stem}.json",
             mime="application/json",
-            use_container_width=True,
+            width="stretch",
         )
     with col_b:
         st.download_button(
@@ -481,7 +481,7 @@ def render_report(
             data=to_text(report, filename, market),
             file_name=f"raport_{stem}.txt",
             mime="text/plain",
-            use_container_width=True,
+            width="stretch",
         )
 
 
@@ -610,7 +610,7 @@ def render_linguistic_report(
         data=txt,
         file_name=f"jezyk_{stem}.txt",
         mime="text/plain",
-        use_container_width=True,
+        width="stretch",
     )
 
 
@@ -818,7 +818,7 @@ def render_structure_report(
             data=txt,
             file_name=f"struktura_{stem}.txt",
             mime="text/plain",
-            use_container_width=True,
+            width="stretch",
         )
 
     with col_jsx:
@@ -830,7 +830,7 @@ def render_structure_report(
             data=jsx_script,
             file_name=f"qc_{stem}.jsx",
             mime="application/javascript",
-            use_container_width=True,
+            width="stretch",
             help=(
                 "Otw\u00f3rz etykiet\u0119 w Illustratorze, "
                 "potem File > Scripts > Other Script > wybierz ten plik. "
@@ -855,7 +855,7 @@ def render_structure_report(
                 data=annotated_bytes,
                 file_name=f"annotated_{stem}.{ext}",
                 mime=out_mime,
-                use_container_width=True,
+                width="stretch",
                 help=(
                     "Kopia etykiety z naniesionymi prostok\u0105tami "
                     "oznaczaj\u0105cymi wykryte problemy."
@@ -925,7 +925,7 @@ def render_translation_report(result, filename: str) -> None:
         data=translation_to_text(result, filename),
         file_name=f"tlumaczenie_{stem}.txt",
         mime="text/plain",
-        use_container_width=True,
+        width="stretch",
     )
 
 
@@ -1148,7 +1148,7 @@ def render_design_report(result, filename: str) -> None:
             data=design_to_text(result, filename),
             file_name=f"design_{stem}.txt",
             mime="text/plain",
-            use_container_width=True,
+            width="stretch",
         )
     with col_b:
         st.download_button(
@@ -1156,7 +1156,7 @@ def render_design_report(result, filename: str) -> None:
             data=result.report.model_dump_json(indent=2, exclude_none=True),
             file_name=f"design_{stem}.json",
             mime="application/json",
-            use_container_width=True,
+            width="stretch",
         )
 
 
@@ -1246,7 +1246,7 @@ def render_ean_report(result, filename: str) -> None:
         data=ean_to_text(result, filename),
         file_name=f"ean_{stem}.txt",
         mime="text/plain",
-        use_container_width=True,
+        width="stretch",
     )
 
 
@@ -1384,7 +1384,7 @@ def render_claims_report(result, filename: str) -> None:
         data=claims_to_text(result, filename),
         file_name=f"claimy_{stem}.txt",
         mime="text/plain",
-        use_container_width=True,
+        width="stretch",
     )
 
 
@@ -1643,7 +1643,7 @@ def render_presentation_report(result, filename: str) -> None:
         data=presentation_to_text(result, filename),
         file_name=f"prezentacja_{stem}.txt",
         mime="text/plain",
-        use_container_width=True,
+        width="stretch",
     )
 
 
@@ -1757,7 +1757,7 @@ def render_market_report(result, filename: str) -> None:
         data=market_check_to_text(result, filename),
         file_name=f"rynek_{stem}.txt",
         mime="text/plain",
-        use_container_width=True,
+        width="stretch",
     )
 
 
@@ -1835,7 +1835,7 @@ def render_label_text_report(result, filename: str) -> None:
             data=label_text_to_text(result, filename),
             file_name=f"etykieta_{stem}.txt",
             mime="text/plain",
-            use_container_width=True,
+            width="stretch",
         )
     with col_b:
         from fediaf_verifier.jsx_text_generator import generate_text_jsx
@@ -1852,7 +1852,7 @@ def render_label_text_report(result, filename: str) -> None:
             data=jsx_script,
             file_name=f"tekst_{stem}.jsx",
             mime="application/javascript",
-            use_container_width=True,
+            width="stretch",
             help=(
                 "Otw\u00f3rz etykiet\u0119 w Illustratorze, "
                 "potem File > Scripts > Other Script > wybierz ten plik. "
@@ -2026,7 +2026,7 @@ def render_product_description_report(result, filename: str) -> None:
             data=product_description_to_text(result, filename),
             file_name=f"opis_{stem}.txt",
             mime="text/plain",
-            use_container_width=True,
+            width="stretch",
         )
     with col_b:
         st.download_button(
@@ -2034,7 +2034,7 @@ def render_product_description_report(result, filename: str) -> None:
             data=r.complete_html or r.complete_text,
             file_name=f"opis_{stem}.html",
             mime="text/html",
-            use_container_width=True,
+            width="stretch",
         )
     with col_c:
         st.download_button(
@@ -2042,7 +2042,7 @@ def render_product_description_report(result, filename: str) -> None:
             data=r.model_dump_json(indent=2, exclude_none=True),
             file_name=f"opis_{stem}.json",
             mime="application/json",
-            use_container_width=True,
+            width="stretch",
         )
 
 
@@ -2202,7 +2202,7 @@ def render_diff_report(
         data=diff_to_text(result, old_filename, new_filename),
         file_name=f"diff_{stem}.txt",
         mime="text/plain",
-        use_container_width=True,
+        width="stretch",
     )
 
 
@@ -2624,7 +2624,7 @@ def render_artwork_inspection_report(
             data=artwork_inspection_to_text(result, filename_a, filename_b),
             file_name=f"artwork_{stem_a}.txt",
             mime="text/plain",
-            use_container_width=True,
+            width="stretch",
         )
     with col_b:
         json_data = result.report.model_dump_json(
@@ -2637,5 +2637,5 @@ def render_artwork_inspection_report(
             data=json_data,
             file_name=f"artwork_{stem_a}.json",
             mime="application/json",
-            use_container_width=True,
+            width="stretch",
         )

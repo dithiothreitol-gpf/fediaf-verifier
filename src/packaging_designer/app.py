@@ -291,7 +291,7 @@ def _render_export(
                 file_name="packaging_design_ai.zip",
                 mime="application/zip",
                 type="primary",
-                use_container_width=True,
+                width="stretch",
             )
             st.caption(
                 "Zawiera: `packaging_design.jsx` + `assets/`\n\n"
@@ -303,7 +303,7 @@ def _render_export(
                 data=jsx_content,
                 file_name="packaging_design.jsx",
                 mime="text/plain",
-                use_container_width=True,
+                width="stretch",
             )
 
         with st.expander("Podgl\u0105d JSX"):
@@ -327,7 +327,7 @@ def _render_export(
             file_name="packaging_design.idml",
             mime="application/vnd.adobe.indesign-idml-package",
             type="primary" if not want_jsx else "secondary",
-            use_container_width=True,
+            width="stretch",
         )
         st.caption(
             "Otw\u00f3rz bezpo\u015brednio w InDesign (CS4+).\n\n"
@@ -370,7 +370,7 @@ def _render_batch_ui(export_format: str, bleed_mm: float):
     gen_jsx = "Illustrator" in export_format or "Oba" in export_format
     gen_idml = "InDesign" in export_format or "Oba" in export_format
 
-    if st.button("Przetw\u00f3rz wsadowo", type="primary", use_container_width=True):
+    if st.button("Przetw\u00f3rz wsadowo", type="primary", width="stretch"):
         from packaging_designer.batch import BatchItem, package_batch_results, run_batch
 
         items = []
@@ -411,7 +411,7 @@ def _render_batch_ui(export_format: str, bleed_mm: float):
                 file_name="batch_packaging_output.zip",
                 mime="application/zip",
                 type="primary",
-                use_container_width=True,
+                width="stretch",
             )
 
         except Exception as e:
@@ -467,7 +467,7 @@ def main():
     st.image(concept_bytes, caption="Za\u0142adowana grafika", width=400)
 
     # --- STEP 2: Analysis ---
-    if st.button("Analizuj grafik\u0119", type="primary", use_container_width=True):
+    if st.button("Analizuj grafik\u0119", type="primary", width="stretch"):
         with st.spinner("Analizowanie z AI\u2026"):
             try:
                 provider = _get_provider()
@@ -502,7 +502,7 @@ def main():
     selected_ids, ean_number = _render_enrichment_ui(analysis)
 
     if selected_ids:
-        if st.button("Generuj brakuj\u0105ce elementy", use_container_width=True):
+        if st.button("Generuj brakuj\u0105ce elementy", width="stretch"):
             from packaging_designer.pipeline import run_enrichment
 
             enrichment = run_enrichment(
@@ -536,7 +536,7 @@ def main():
             height=100,
         )
 
-        if st.button("Generuj back label", use_container_width=True):
+        if st.button("Generuj back label", width="stretch"):
             with st.spinner("Generowanie tylnej etykiety\u2026"):
                 try:
                     from packaging_designer.back_label import generate_back_label
