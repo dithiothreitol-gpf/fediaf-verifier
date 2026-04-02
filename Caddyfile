@@ -1,4 +1,4 @@
-:443 {
+https://185.235.69.94 {
     tls internal
 
     reverse_proxy app:8501
@@ -12,6 +12,6 @@
 }
 
 # Redirect HTTP → HTTPS
-:80 {
-    redir https://{host}{uri} permanent
+http://185.235.69.94 {
+    redir https://185.235.69.94{uri} permanent
 }
