@@ -67,17 +67,19 @@ class DataCollector:
             return None
 
         try:
-            # Deduplicate image by content hash
-            image_hash = hashlib.sha256(image_b64[:10000].encode()).hexdigest()[:16]
-            image_ext = _media_type_to_ext(media_type)
-            image_filename = f"{image_hash}{image_ext}"
-            image_path = self.images_dir / image_filename
+            # Deduplicate image by content hash (skip if no image)
+            image_hash = ""
+            if image_b64:
+                image_hash = hashlib.sha256(image_b64[:10000].encode()).hexdigest()[:16]
+                image_ext = _media_type_to_ext(media_type)
+                image_filename = f"{image_hash}{image_ext}"
+                image_path = self.images_dir / image_filename
 
-            if not image_path.exists():
-                import base64
+                if not image_path.exists():
+                    import base64
 
-                image_path.write_bytes(base64.b64decode(image_b64))
-                logger.debug("Saved training image: {}", image_filename)
+                    image_path.write_bytes(base64.b64decode(image_b64))
+                    logger.debug("Saved training image: {}", image_filename)
 
             # Determine if self-verify made corrections
             was_corrected = False
@@ -91,7 +93,7 @@ class DataCollector:
                 "model": model,
                 "prompt": prompt,
                 "image_hash": image_hash,
-                "image_path": str(image_path.relative_to(self.base_dir)),
+                "image_path": str(image_path.relative_to(self.base_dir)) if image_b64 else "",
                 "media_type": media_type,
                 "raw_response": raw_response,
                 "verified_response": verified_response,

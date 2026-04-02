@@ -1338,7 +1338,7 @@ Przy cz\u0119stych b\u0142\u0119dach \u2014 odczekaj minut\u0119 mi\u0119dzy ana
                         repo=settings.github_issues_repo,
                         title=f"[{issue_type}] {issue_title.strip()}",
                         body=full_body,
-                        labels=[issue_type],
+                        labels=None,
                     )
 
                 if result.success:
