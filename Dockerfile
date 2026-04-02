@@ -6,9 +6,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# System deps (pdf2image needs poppler for DOCX→PDF pipeline)
+# System deps (poppler for DOCX→PDF, git for pip install from GitHub)
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends poppler-utils && \
+    apt-get install -y --no-install-recommends poppler-utils git && \
     rm -rf /var/lib/apt/lists/*
 
 # Install Python deps first (layer cache)
@@ -22,9 +22,9 @@ COPY data/ data/
 # Install PyTorch CPU-only first (much smaller than full CUDA build)
 RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu
 
-# Install the project with optional dependencies
+# Install the project with optional dependencies (including saliency from GitHub)
 RUN pip install --no-cache-dir --no-deps easyocr && \
-    pip install --no-cache-dir ".[annotation,additives,designer,catalog,docx-convert,ocr]"
+    pip install --no-cache-dir ".[annotation,additives,designer,catalog,docx-convert,ocr,saliency]"
 
 # Dirs for runtime
 RUN mkdir -p logs data

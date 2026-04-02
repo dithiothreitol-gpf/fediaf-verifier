@@ -31,7 +31,7 @@ ocr = [
     "easyocr>=1.7.0",
 ]
 saliency = [
-    "deepgaze-pytorch>=1.0.0",
+    "deepgaze-pytorch @ git+https://github.com/matthias-k/DeepGaze.git",
     "torch>=2.0.0",
     "scipy>=1.11.0",
 ]
