@@ -1,3 +1,7 @@
+{
+    default_sni 185.235.69.94
+}
+
 https://185.235.69.94 {
     tls internal
 
