@@ -20,7 +20,7 @@ COPY src/ src/
 COPY data/ data/
 
 # Install the project with optional dependencies
-RUN pip install --no-cache-dir ".[annotation,additives,designer,catalog,docx-convert]"
+RUN pip install --no-cache-dir ".[annotation,additives,designer,catalog,docx-convert,ocr,saliency]"
 
 # Dirs for runtime
 RUN mkdir -p logs data
