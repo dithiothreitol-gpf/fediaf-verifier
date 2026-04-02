@@ -22,8 +22,8 @@ COPY data/ data/
 # Install PyTorch CPU-only first (much smaller than full CUDA build)
 RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu
 
-# Install CLIP (required by deepgaze-pytorch, not on PyPI)
-RUN pip install --no-cache-dir git+https://github.com/openai/CLIP.git
+# Install CLIP and einops (required by deepgaze-pytorch, CLIP not on PyPI)
+RUN pip install --no-cache-dir git+https://github.com/openai/CLIP.git einops
 
 # Install the project with optional dependencies (including saliency from GitHub)
 RUN pip install --no-cache-dir --no-deps easyocr && \
