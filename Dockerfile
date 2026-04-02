@@ -23,7 +23,7 @@ COPY data/ data/
 RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
 
 # Install the project with optional dependencies
-RUN pip install --no-cache-dir ".[annotation,additives,designer,catalog,docx-convert,ocr,saliency]"
+RUN pip install --no-cache-dir ".[annotation,additives,designer,catalog,docx-convert,ocr]"
 
 # Dirs for runtime
 RUN mkdir -p logs data
