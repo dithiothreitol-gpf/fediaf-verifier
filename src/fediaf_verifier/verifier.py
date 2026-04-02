@@ -263,6 +263,19 @@ def verify_label_diff(
         data = json.loads(json_text)
 
         report = LabelDiffReport.model_validate(data)
+
+        # Collect training data (use old image as reference)
+        collector = _get_collector(settings)
+        if collector is not None:
+            collector.record(
+                mode="diff",
+                model=getattr(provider, "_model", getattr(provider, "model", "unknown")),
+                prompt=LABEL_DIFF_PROMPT,
+                image_b64=old_b64,
+                media_type=old_media_type,
+                raw_response=data,
+            )
+
         return LabelDiffResult(performed=True, report=report)
 
     try:
@@ -327,6 +340,19 @@ def verify_translation(
         data = json.loads(json_text)
 
         report = TranslationReport.model_validate(data)
+
+        # Collect training data
+        collector = _get_collector(settings)
+        if collector is not None:
+            collector.record(
+                mode="translation",
+                model=getattr(provider, "_model", getattr(provider, "model", "unknown")),
+                prompt=prompt,
+                image_b64=label_b64,
+                media_type=media_type,
+                raw_response=data,
+            )
+
         return TranslationResult(performed=True, report=report)
 
     try:
@@ -519,6 +545,19 @@ def generate_label_text(
         data = json.loads(json_text)
 
         report = LabelTextReport.model_validate(data)
+
+        # Collect training data (text-only, no image)
+        collector = _get_collector(settings)
+        if collector is not None:
+            collector.record(
+                mode="label_text",
+                model=getattr(provider, "_model", getattr(provider, "model", "unknown")),
+                prompt=prompt,
+                image_b64="",
+                media_type="",
+                raw_response=data,
+            )
+
         return LabelTextResult(performed=True, report=report)
 
     try:
@@ -750,9 +789,22 @@ def _self_verify_product_description(
     )
 
     if not settings.self_verify_enabled:
+        # Still collect raw data even without self-verify
+        collector = _get_collector(settings)
+        if collector is not None:
+            raw_data = json.loads(result_json)
+            collector.record(
+                mode="product_description",
+                model=getattr(provider, "_model", getattr(provider, "model", "unknown")),
+                prompt="",
+                image_b64=label_b64,
+                media_type=media_type,
+                raw_response=raw_data,
+            )
         return None
 
     logger.info("Self-verify: verifying product description against input data...")
+    verify_prompt = ""
 
     try:
         # Build input data summary as ground truth
@@ -800,12 +852,29 @@ def _self_verify_product_description(
         corrected_data = json.loads(corrected_json)
         corrected = ProductDescriptionReport.model_validate(corrected_data)
         logger.info("Self-verify: product description corrected successfully")
-        return corrected
+        verified_data = corrected_data
     except Exception as e:
         logger.warning(
             "Self-verify failed for product description (using original): {}", e
         )
-        return None
+        corrected = None
+        verified_data = None
+
+    # Collect training data (raw + verified pair)
+    raw_data = json.loads(result_json)
+    collector = _get_collector(settings)
+    if collector is not None:
+        collector.record(
+            mode="product_description",
+            model=getattr(provider, "_model", getattr(provider, "model", "unknown")),
+            prompt=verify_prompt,
+            image_b64=label_b64,
+            media_type=media_type,
+            raw_response=raw_data,
+            verified_response=verified_data,
+        )
+
+    return corrected
 
 
 def generate_product_description(
@@ -1027,6 +1096,19 @@ def verify_ean(
             all_valid=all_valid,
             summary=ai_summary,
         )
+
+        # Collect training data
+        collector = _get_collector(settings)
+        if collector is not None:
+            collector.record(
+                mode="ean",
+                model=getattr(provider, "_model", getattr(provider, "model", "unknown")),
+                prompt=EAN_EXTRACTION_PROMPT,
+                image_b64=label_b64,
+                media_type=media_type,
+                raw_response=data,
+            )
+
         return EANCheckResult(performed=True, report=report)
 
     try:
@@ -1066,6 +1148,18 @@ def verify_design_analysis(
         data = json.loads(json_text)
 
         report = DesignAnalysisReport.model_validate(data)
+
+        # Collect training data
+        collector = _get_collector(settings)
+        if collector is not None:
+            collector.record(
+                mode="design",
+                model=getattr(provider, "_model", getattr(provider, "model", "unknown")),
+                prompt=DESIGN_ANALYSIS_PROMPT,
+                image_b64=label_b64,
+                media_type=media_type,
+                raw_response=data,
+            )
 
         # --- Benchmarks ---
         try:
@@ -1159,6 +1253,18 @@ def verify_artwork_inspection(
 
             report.ai_summary = ai_data.get("ai_summary", "")
             report.ai_recommendations = ai_data.get("ai_recommendations", [])
+
+            # Collect training data
+            collector = _get_collector(settings)
+            if collector is not None:
+                collector.record(
+                    mode="artwork",
+                    model=getattr(provider, "_model", getattr(provider, "model", "unknown")),
+                    prompt=prompt,
+                    image_b64=img_a_b64,
+                    media_type=media_type_a,
+                    raw_response=ai_data,
+                )
         except Exception as e:
             logger.warning("AI summary for artwork inspection failed: {}", e)
             report.ai_summary = "Podsumowanie AI niedostepne — wyniki deterministyczne powyzej."
@@ -1681,6 +1787,18 @@ def _extract_label_data(
         json_text = extract_json(raw_text)
         data = json.loads(json_text)
 
+        # Collect training data
+        collector = _get_collector(settings)
+        if collector is not None:
+            collector.record(
+                mode="full_extraction",
+                model=getattr(provider, "_model", getattr(provider, "model", "unknown")),
+                prompt=EXTRACTION_PROMPT,
+                image_b64=label_b64,
+                media_type=media_type,
+                raw_response=data,
+            )
+
         # Normalize booleans (AI might return "yes"/"tak" instead of true)
         for key, val in list(data.items()):
             if (
@@ -1737,6 +1855,19 @@ def _secondary_check(
 
         json_text = extract_json(raw_text)
         data = json.loads(json_text)
+
+        # Collect training data
+        collector = _get_collector(settings)
+        if collector is not None:
+            collector.record(
+                mode="full_secondary",
+                model=getattr(provider, "_model", getattr(provider, "model", "unknown")),
+                prompt=SECONDARY_CHECK_PROMPT,
+                image_b64=label_b64,
+                media_type=media_type,
+                raw_response=data,
+            )
+
         return SecondaryCheck.model_validate(data)
 
     try:

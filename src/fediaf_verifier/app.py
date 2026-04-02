@@ -1274,6 +1274,86 @@ Przy cz\u0119stych b\u0142\u0119dach \u2014 odczekaj minut\u0119 mi\u0119dzy ana
 
     render_feature_manager()
 
+    # -- Issue reporting (GitHub) --
+    if settings.github_issues_token and settings.github_issues_repo:
+        st.divider()
+        _issue_types = {
+            "bug": "\U0001f41b B\u0142\u0105d / niepoprawny wynik",
+            "feature": "\U0001f4a1 Propozycja funkcji",
+            "question": "\u2753 Pytanie",
+        }
+
+        @st.dialog("Zg\u0142o\u015b problem")
+        def _report_issue_dialog():
+            issue_type = st.selectbox(
+                "Typ zg\u0142oszenia",
+                list(_issue_types.keys()),
+                format_func=lambda k: _issue_types[k],
+            )
+            issue_title = st.text_input(
+                "Tytu\u0142 (kr\u00f3tki opis)", max_chars=120,
+            )
+            issue_body = st.text_area(
+                "Szczeg\u00f3\u0142owy opis",
+                height=150,
+                placeholder="Opisz problem, kroki do odtworzenia, "
+                "oczekiwany vs rzeczywisty wynik...",
+            )
+            issue_contact = st.text_input(
+                "E-mail kontaktowy (opcjonalnie)",
+                max_chars=100,
+            )
+
+            if st.button("Wy\u015blij zg\u0142oszenie", type="primary", use_container_width=True):
+                if not issue_title.strip():
+                    st.error("Podaj tytu\u0142 zg\u0142oszenia.")
+                    return
+                if not issue_body.strip():
+                    st.error("Podaj opis problemu.")
+                    return
+
+                # Build issue body
+                body_parts = [issue_body.strip()]
+
+                # Attach context if a report exists
+                report = st.session_state.get("report")
+                if report:
+                    report_type = type(report).__name__
+                    filename = st.session_state.get("report_filename", "")
+                    body_parts.append(
+                        f"\n---\n**Kontekst:** tryb `{report_type}`, "
+                        f"plik: `{filename}`"
+                    )
+
+                if issue_contact.strip():
+                    body_parts.append(f"\n**Kontakt:** {issue_contact.strip()}")
+
+                full_body = "\n".join(body_parts)
+
+                from fediaf_verifier.github_issues import create_issue
+
+                with st.spinner("Wysy\u0142am zg\u0142oszenie..."):
+                    result = create_issue(
+                        token=settings.github_issues_token,
+                        repo=settings.github_issues_repo,
+                        title=f"[{issue_type}] {issue_title.strip()}",
+                        body=full_body,
+                        labels=[issue_type],
+                    )
+
+                if result.success:
+                    st.success(
+                        f"Zg\u0142oszenie #{result.number} utworzone. "
+                        "Dzi\u0119kujemy za informacj\u0119!"
+                    )
+                else:
+                    st.error(
+                        f"Nie uda\u0142o si\u0119 wys\u0142a\u0107 zg\u0142oszenia: {result.error}"
+                    )
+
+        if st.button("\U0001f4e9 Zg\u0142o\u015b problem", use_container_width=True):
+            _report_issue_dialog()
+
     st.caption("v1.0 \u00b7 BULT Quality Assurance")
 
 

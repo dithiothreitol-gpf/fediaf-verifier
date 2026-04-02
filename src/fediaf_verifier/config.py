@@ -99,6 +99,10 @@ class AppSettings(BaseSettings):
     data_collection_enabled: bool = False
     data_collection_dir: str = "data/training"
 
+    # GitHub issue reporting (optional — enables "Report issue" button in the app)
+    github_issues_token: str = ""
+    github_issues_repo: str = ""
+
     # Logging
     log_level: str = "INFO"
 

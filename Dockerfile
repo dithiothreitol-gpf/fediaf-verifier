@@ -19,8 +19,8 @@ RUN pip install --no-cache-dir . 2>/dev/null || true
 COPY src/ src/
 COPY data/ data/
 
-# Install the project itself
-RUN pip install --no-cache-dir .
+# Install the project with optional dependencies
+RUN pip install --no-cache-dir ".[annotation,additives,designer,catalog,docx-convert]"
 
 # Dirs for runtime
 RUN mkdir -p logs data
