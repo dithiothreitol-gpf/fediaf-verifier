@@ -19,6 +19,9 @@ RUN pip install --no-cache-dir . 2>/dev/null || true
 COPY src/ src/
 COPY data/ data/
 
+# Install PyTorch CPU-only first (much smaller than full CUDA build)
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+
 # Install the project with optional dependencies
 RUN pip install --no-cache-dir ".[annotation,additives,designer,catalog,docx-convert,ocr,saliency]"
 
