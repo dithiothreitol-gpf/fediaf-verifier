@@ -20,10 +20,11 @@ COPY src/ src/
 COPY data/ data/
 
 # Install PyTorch CPU-only first (much smaller than full CUDA build)
-RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu
 
 # Install the project with optional dependencies
-RUN pip install --no-cache-dir ".[annotation,additives,designer,catalog,docx-convert,ocr]"
+RUN pip install --no-cache-dir --no-deps easyocr && \
+    pip install --no-cache-dir ".[annotation,additives,designer,catalog,docx-convert,ocr]"
 
 # Dirs for runtime
 RUN mkdir -p logs data
